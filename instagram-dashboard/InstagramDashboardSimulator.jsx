@@ -13,18 +13,18 @@
  *   4. Diagnóstico estratégico de la cuenta (mezcla de pilares, puente comercial, jerga)
  *   4b. Revisión antes de publicar: analiza un archivo subido (texto, imagen o video)
  *   5. Componentes visuales
- *   6. Vistas: Resumen, Contenido, Análisis profundo, Importar
+ *   6. Vistas: Resumen, Contenido, Análisis profundo, Revisión antes de publicar
  *   7. App
  *
  * Todo es simulado: no hay conexión con Instagram. El análisis sí se calcula
  * con reglas sobre las métricas de cada publicación.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, ArrowUpRight, BookOpen, Bookmark, BookmarkCheck, Briefcase, ChevronRight, CircleCheck,
   CircleX, Clapperboard, Clock, Copy, Check, Eye, Feather, Filter, GalleryHorizontalEnd, GraduationCap,
-  Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb, Link2,
-  Loader2, Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Plus, Search,
+  Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb,
+  Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
   Upload, FileText, FileVideo, FileImage, ClipboardPaste,
 } from "lucide-react";
@@ -41,24 +41,6 @@ const dec = (n, d = 1) => n.toFixed(d).replace(".", ",");
 const clamp = (v, a = 0, b = 100) => Math.min(b, Math.max(a, v));
 const dateFmt = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 const cx = (...c) => c.filter(Boolean).join(" ");
-
-function hashString(s) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-function mulberry32(a) {
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const ACCOUNT = {
   handle: "@tu.cuaderno",
@@ -90,16 +72,9 @@ const PILLARS = {
     icon: GraduationCap,
     target: 40,
     color: "bg-p1", text: "text-p1", soft: "bg-p1/12",
-    palette: ["#1b2a41", "#324a5f"], ink: "#f3ead8", lowInk: "#4b6278",
-    titles: ["Cómo construye el suspenso Patricia Highsmith", "El narrador poco confiable, explicado", "Qué hace que un diálogo suene real", "Bourdieu y el campo literario argentino"],
+    palette: ["#1b2a41", "#324a5f"], ink: "#f3ead8",
     hookAlt: "Hay un truco que usan todas las novelas que no podés dejar de leer. Te lo muestro en 3 ejemplos.",
     bridgeCTA: "Si querés aplicar esto a tu propia novela, seguime: en noviembre abro la lista de espera del taller.",
-    comments: [
-      { text: "¿Esto también aplica a cuentos o solo a novela?", value: true },
-      { text: "Lo estoy aplicando a mi manuscrito, ¿puedo mandarte una duda?", value: true },
-      { text: "🔥🔥🔥", value: false },
-      { text: "Excelente 👏", value: false },
-    ],
   },
   proceso: {
     label: "Detrás de Escena / Proceso",
@@ -109,16 +84,9 @@ const PILLARS = {
     icon: PenLine,
     target: 35,
     color: "bg-p2", text: "text-p2", soft: "bg-p2/12",
-    palette: ["#6b2d1f", "#b5653a"], ink: "#fff1e0", lowInk: "#a86245",
-    titles: ["Mi mesa de trabajo un martes cualquiera", "Reescribí este párrafo 9 veces", "Cómo organizo la investigación de mi novela", "El capítulo que casi borro entero"],
+    palette: ["#6b2d1f", "#b5653a"], ink: "#fff1e0",
     hookAlt: "Borré 40 páginas de mi novela la semana pasada. Te cuento por qué fue la mejor decisión.",
     bridgeCTA: "Si estás trabada con tu novela, escribime “CAPÍTULO” por mensaje y te cuento cómo trabajo en las mentorías.",
-    comments: [
-      { text: "Me pasa exactamente lo mismo con mi segundo capítulo 😩 ¿cómo hiciste para retomarlo?", value: true },
-      { text: "¿Hacés acompañamiento de manuscritos?", value: true },
-      { text: "❤️❤️", value: false },
-      { text: "Qué lindo", value: false },
-    ],
   },
   comunidad: {
     label: "Comunidad y Reflexión",
@@ -128,16 +96,9 @@ const PILLARS = {
     icon: MessagesSquare,
     target: 25,
     color: "bg-p3", text: "text-p3", soft: "bg-p3/12",
-    palette: ["#2f3e36", "#58705f"], ink: "#eef3e8", lowInk: "#6f8a77",
-    titles: ["¿Se puede enseñar a escribir?", "El libro que abandoné y no me arrepiento", "Leer por obligación vs. leer por deseo", "¿Para quién escribís?"],
+    palette: ["#2f3e36", "#58705f"], ink: "#eef3e8",
     hookAlt: "¿Se puede enseñar a escribir? Mi respuesta después de 10 años investigando cómo escriben los escritores.",
     bridgeCTA: "Contame en comentarios qué te frena hoy: con eso armo el programa del próximo taller.",
-    comments: [
-      { text: "Para mí escribir es reescribir, pero me cuesta aceptar la soledad del proceso", value: true },
-      { text: "Gran pregunta. Yo creo que se enseña el oficio, no el talento", value: true },
-      { text: "💯", value: false },
-      { text: "Hermoso", value: false },
-    ],
   },
 };
 const PILLAR_KEYS = Object.keys(PILLARS);
@@ -236,87 +197,6 @@ const SEED_POSTS = [
     },
   },
 ];
-
-const URL_RE = /^(https?:\/\/)?(www\.)?instagram\.com\/(reel|reels|p|tv)\/([A-Za-z0-9_-]{5,})\/?(\?.*)?$/i;
-
-/** Publicación simulada y determinista a partir de un enlace. */
-function generatePost(url, pillarChoice) {
-  const match = url.match(URL_RE);
-  const shortcode = match[4];
-  const r = mulberry32(hashString(shortcode));
-  const pick = (arr) => arr[Math.floor(r() * arr.length)];
-  const type = match[3].toLowerCase() === "p" ? (r() < 0.6 ? "carousel" : "photo") : "reel";
-  const pillar = pillarChoice === "auto" ? pick(PILLAR_KEYS) : pillarChoice;
-  const P = PILLARS[pillar];
-  const q = r();
-  const title = pick(P.titles);
-  const jargon = Math.round(clamp(10 + (1 - q) * 70 + (r() - 0.5) * 20, 5, 95));
-
-  const reach = Math.round((1500 + q * q * 22000) * (0.7 + r() * 0.6));
-  // Cada pilar empuja una métrica distinta: autoridad -> guardados, proceso -> DMs, comunidad -> comentarios
-  const saveBias = pillar === "autoridad" ? 1.6 : pillar === "proceso" ? 0.6 : 0.5;
-  const dmBias = pillar === "proceso" ? 2.2 : pillar === "comunidad" ? 1 : 0.6;
-  const commentBias = pillar === "comunidad" ? 1.8 : pillar === "proceso" ? 1.4 : 0.9;
-  const saves = Math.round(reach * (0.004 + q * 0.06) * saveBias);
-  const shares = Math.round(saves * (0.15 + r() * 0.25));
-  const totalComments = Math.round(reach * (0.002 + q * 0.012) * commentBias);
-  const valueShare = clamp(0.15 + q * 0.6 - jargon / 400, 0.08, 0.85);
-  const dms = Math.round(reach * (0.0004 + q * 0.006) * dmBias);
-
-  const post = {
-    id: `imp-${shortcode}`, imported: true, url, type, pillar,
-    date: new Date().toISOString().slice(0, 10),
-    hour: Math.floor(r() * 24),
-    title,
-    caption: `${title}. Una reflexión desde la sociología y el oficio de escribir…`,
-    cover: { palette: P.palette, ink: P.ink, kicker: P.short, headline: title },
-    metrics: {
-      reach,
-      impressions: Math.round(reach * (1.08 + r() * 0.35)),
-      nonFollowerPct: Math.round(clamp(10 + q * 60 * (0.75 + r() * 0.25), 5, 90)),
-      likes: Math.round(reach * (0.03 + q * 0.06)),
-      saves, shares,
-      comments: { total: totalComments, value: Math.round(totalComments * valueShare) },
-      dms, dmInquiries: Math.round(dms * (0.05 + q * 0.25)),
-      follows: Math.round((reach * (0.4 + q * 14)) / 1000),
-      profileVisits: Math.round((reach * (8 + q * 80)) / 1000),
-    },
-    attrs: {
-      commercialBridge: r() < 0.2 + q * 0.4,
-      jargon,
-      vulnerability: pillar === "proceso" ? true : r() < 0.25,
-      openQuestion: r() < 0.3 + q * 0.5,
-      readMorePct: Math.round(clamp(15 + q * 45, 10, 70)),
-      coverLow: r() < 0.2 + (1 - q) * 0.2,
-      hookText: null,
-    },
-    sampleComments: [pick(P.comments.filter((c) => c.value)), pick(P.comments.filter((c) => !c.value))],
-    copy: {},
-  };
-  if (post.attrs.coverLow) post.cover.ink = P.lowInk;
-
-  if (type === "reel") {
-    const duration = Math.round(20 + r() * 50 + jargon / 4);
-    const r3 = Math.round(clamp(28 + q * 60 - jargon / 6 + (r() - 0.5) * 10, 18, 92));
-    const end = r3 * (0.2 + q * 0.5);
-    const k = 0.05 + (1 - q) * 0.1;
-    const pts = [[0, 100], [1, Math.round(r3 + (100 - r3) * 0.5)], [3, r3]];
-    [6, 10, 15, 20, 30, 40, 50, 60].filter((t) => t < duration).forEach((t) => {
-      pts.push([t, Math.round(end + (r3 - end) * Math.exp(-k * (t - 3)))]);
-    });
-    pts.push([duration, Math.round(end)]);
-    post.duration = duration;
-    post.retention = pts;
-  }
-  if (type === "carousel") {
-    const slides = 5 + Math.floor(r() * 6);
-    const s2 = clamp(32 + q * 52 + (r() - 0.5) * 10, 25, 92);
-    const decay = 0.03 + (1 - q) * 0.1;
-    post.slides = slides;
-    post.slideRetention = Array.from({ length: slides }, (_, i) => (i === 0 ? 100 : Math.round(s2 * Math.pow(1 - decay, i - 1))));
-  }
-  return post;
-}
 
 /* ============================================================
  * 3. Motor de análisis por publicación
@@ -1408,7 +1288,6 @@ function PostCard({ post, analysis, onOpen }) {
           <span className="flex items-center gap-1.5"><MessageSquareQuote className="h-4 w-4" />{fmt(post.metrics.comments.value)} comentarios de valor</span>
           <span className="flex items-center gap-1.5"><Mail className="h-4 w-4" />{fmt(post.metrics.dms)} mensajes</span>
         </div>
-        {post.imported && <span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">Importado</span>}
       </div>
       <div className="flex flex-1 flex-col gap-2 p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1425,7 +1304,7 @@ function PostCard({ post, analysis, onOpen }) {
   );
 }
 
-function ContentView({ posts, analyses, onOpen, onImport }) {
+function ContentView({ posts, analyses, onOpen, onUpload }) {
   const [query, setQuery] = useState("");
   const [pillar, setPillar] = useState("all");
   const [format, setFormat] = useState("all");
@@ -1462,8 +1341,8 @@ function ContentView({ posts, analyses, onOpen, onImport }) {
           <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl">Tus publicaciones</h1>
           <p className="mt-1 text-sm text-muted">Tocá cualquier publicación para ver si construye autoridad y atrae alumnos.</p>
         </div>
-        <button onClick={onImport} className="brand-grad inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:brightness-110">
-          <Link2 className="h-4 w-4" /> Importar y analizar enlace
+        <button onClick={onUpload} className="brand-grad inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:brightness-110">
+          <Upload className="h-4 w-4" /> Subir post/video
         </button>
       </header>
 
@@ -1768,10 +1647,10 @@ function UploadZone({ onFile, onPick, onPaste }) {
         <p className="text-xs leading-relaxed text-muted">Arrastrá acá una imagen, un video o un archivo .txt con el texto. Lo analizo con los mismos criterios y te muestro qué corregir.</p>
       </div>
       <div className="flex shrink-0 gap-2">
-        <button onClick={onPick} className="brand-grad inline-flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 sm:flex-none">
+        <button onClick={onPick} className="brand-grad inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110 sm:flex-none">
           <Upload className="h-4 w-4" /> Subir post/video
         </button>
-        <button onClick={onPaste} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-semibold transition hover:bg-surface2 sm:flex-none">
+        <button onClick={onPaste} className="inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-line px-3.5 py-2 text-sm font-semibold transition hover:bg-surface2 sm:flex-none">
           <ClipboardPaste className="h-4 w-4" /> Pegar texto
         </button>
       </div>
@@ -1942,149 +1821,9 @@ function DraftPanel({ draft, onClose }) {
   );
 }
 
-const IMPORT_STEPS = ["Leyendo el enlace", "Clasificando el pilar de contenido", "Separando comentarios de valor y superficiales", "Midiendo autoridad, intención y conexión"];
-const SAMPLE_LINKS = ["https://www.instagram.com/p/C7vRtA1sP9e/", "https://www.instagram.com/reel/C9mKq2LxT4p/", "https://www.instagram.com/p/DB8wLm3QzYt/"];
-
-function ImportModal({ onClose, onDone, existing }) {
-  const [url, setUrl] = useState("");
-  const [pillar, setPillar] = useState("auto");
-  const [error, setError] = useState("");
-  const [progress, setProgress] = useState(null);
-  const inputRef = useRef(null);
-  const pending = useRef(null);
-
-  useEffect(() => inputRef.current?.focus(), []);
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && progress === null && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [progress, onClose]);
-  useEffect(() => {
-    if (progress === null) return;
-    if (progress >= 100) {
-      const t = setTimeout(() => onDone(pending.current), 350);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setProgress((p) => Math.min(100, p + 1.5 + Math.random() * 3.5)), 55);
-    return () => clearTimeout(t);
-  }, [progress, onDone]);
-
-  const submit = (e) => {
-    e.preventDefault();
-    const value = url.trim();
-    if (!URL_RE.test(value)) {
-      setError("Ese enlace no es de una publicación de Instagram. Pegá uno con este formato: instagram.com/p/C7vRtA1sP9e/ o instagram.com/reel/…");
-      return;
-    }
-    const post = generatePost(value, pillar);
-    if (existing.some((p) => p.id === post.id)) {
-      onDone(post, true);
-      return;
-    }
-    pending.current = post;
-    setError("");
-    setProgress(0);
-  };
-
-  const loading = progress !== null;
-  const stepIdx = loading ? Math.min(IMPORT_STEPS.length - 1, Math.floor(progress / (100 / IMPORT_STEPS.length))) : -1;
-
-  return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="import-title">
-      <div className="anim-fade absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={loading ? undefined : onClose} />
-      <form onSubmit={submit} className="anim-pop relative w-full max-w-md rounded-3xl border border-line bg-surface p-6 shadow-2xl">
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <div>
-            <span className="brand-grad mb-3 grid h-10 w-10 place-items-center rounded-xl text-white"><Link2 className="h-5 w-5" /></span>
-            <h2 id="import-title" className="font-display text-xl font-bold">Analizar nueva publicación</h2>
-            <p className="mt-1 text-sm text-muted">Pegá el enlace de un Reel, carrusel o foto.</p>
-          </div>
-          {!loading && <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full hover:bg-surface2" aria-label="Cerrar"><X className="h-4 w-4" /></button>}
-        </div>
-
-        {!loading ? (
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="import-url" className="mb-1.5 block text-xs font-semibold text-muted">Enlace de Instagram</label>
-              <input id="import-url" ref={inputRef} value={url} onChange={(e) => { setUrl(e.target.value); setError(""); }}
-                placeholder="https://www.instagram.com/p/…" autoComplete="off" spellCheck="false"
-                aria-invalid={!!error} aria-describedby={error ? "import-error" : undefined}
-                className={cx("w-full rounded-xl border bg-bg px-3.5 py-2.5 font-mono text-sm outline-none transition placeholder:text-muted focus:border-accent", error ? "border-bad" : "border-line")} />
-              {error && <p id="import-error" className="mt-1.5 text-xs leading-relaxed text-bad">{error}</p>}
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                Probar con:
-                {SAMPLE_LINKS.map((l) => (
-                  <button key={l} type="button" onClick={() => { setUrl(l); setError(""); }} className="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[11px] hover:text-fg">
-                    {l.includes("/reel/") ? "reel" : "post"} {l.split("/").filter(Boolean).pop().slice(0, 5)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label htmlFor="import-pillar" className="mb-1.5 block text-xs font-semibold text-muted">Pilar de contenido</label>
-              <select id="import-pillar" value={pillar} onChange={(e) => setPillar(e.target.value)} className="w-full rounded-xl border border-line bg-bg px-3.5 py-2.5 text-sm outline-none focus:border-accent">
-                <option value="auto">Detectar automáticamente</option>
-                {PILLAR_KEYS.map((k) => <option key={k} value={k}>{PILLARS[k].label}</option>)}
-              </select>
-            </div>
-            <p className="rounded-xl bg-surface2 p-3 text-xs leading-relaxed text-muted">
-              Simulación: la app no se conecta a Instagram. Las métricas se generan a partir del enlace (el mismo enlace da siempre el mismo resultado) para probar el análisis.
-            </p>
-            <button type="submit" className="brand-grad flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white transition hover:brightness-110">
-              <Sparkles className="h-4 w-4" /> Importar y analizar
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-5" aria-live="polite">
-            <div>
-              <div className="mb-2 flex items-baseline justify-between text-sm">
-                <span className="font-semibold">{progress >= 100 ? "Análisis listo" : "Analizando…"}</span>
-                <span className="font-mono tabular-nums text-muted">{Math.floor(progress)}%</span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-surface2" role="progressbar" aria-valuenow={Math.floor(progress)} aria-valuemin={0} aria-valuemax={100}>
-                <div className="brand-grad h-full rounded-full transition-[width] duration-100" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
-            <ul className="space-y-2.5">
-              {IMPORT_STEPS.map((s, i) => {
-                const done = i < stepIdx || progress >= 100;
-                const active = i === stepIdx && progress < 100;
-                return (
-                  <li key={s} className={cx("flex items-center gap-2.5 text-sm", !done && !active && "text-muted")}>
-                    {done ? <CircleCheck className="h-4 w-4 text-good" /> : active ? <Loader2 className="h-4 w-4 animate-spin text-accent" /> : <span className="mx-1 h-2 w-2 rounded-full bg-line" />}
-                    {s}
-                  </li>
-                );
-              })}
-            </ul>
-            <p className="truncate font-mono text-xs text-muted">{url}</p>
-          </div>
-        )}
-      </form>
-    </div>
-  );
-}
-
 /* ============================================================
  * 7. App
  * ============================================================ */
-const STORAGE_KEY = "reelscope.autoridad.imported.v1";
-function loadImported() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    return [];
-  }
-}
-function saveImported(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch (e) {
-    /* almacenamiento no disponible */
-  }
-}
-
 function useTheme() {
   const media = typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   const read = () => document.documentElement.dataset.theme || (media?.matches ? "dark" : "light");
@@ -2122,12 +1861,10 @@ function Brand({ compact }) {
 }
 
 export default function App() {
-  const [imported, setImported] = useState(loadImported);
-  const posts = useMemo(() => [...imported, ...SEED_POSTS], [imported]);
+  const posts = SEED_POSTS;
   const analyses = useMemo(() => Object.fromEntries(posts.map((p) => [p.id, analyzePost(p)])), [posts]);
   const [view, setView] = useState("dashboard");
   const [selectedId, setSelectedId] = useState(null);
-  const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [draft, setDraft] = useState(null);
   const fileRef = useRef(null);
@@ -2136,16 +1873,16 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key !== "Escape" || importOpen) return;
+      if (e.key !== "Escape") return;
       if (draft) closeDraft();
       else setSelectedId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [importOpen, draft]);
+  }, [draft]);
   useEffect(() => {
-    document.body.style.overflow = selected || importOpen || draft ? "hidden" : "";
-  }, [selected, importOpen, draft]);
+    document.body.style.overflow = selected || draft ? "hidden" : "";
+  }, [selected, draft]);
 
   const closeDraft = () => {
     if (draft?.url) URL.revokeObjectURL(draft.url);
@@ -2165,22 +1902,6 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const handleImported = useCallback((post, duplicate) => {
-    setImportOpen(false);
-    if (!duplicate) {
-      setImported((prev) => {
-        const next = [post, ...prev];
-        saveImported(next);
-        return next;
-      });
-      setToast(`“${post.title}” se agregó al catálogo.`);
-    } else {
-      setToast("Ese enlace ya estaba analizado. Abrimos su análisis.");
-    }
-    setView("content");
-    setSelectedId(post.id);
-  }, []);
-
   return (
     <div className="min-h-full bg-bg font-body text-fg antialiased">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[76px] flex-col border-r border-line bg-bg px-3 py-6 md:flex xl:w-[260px] xl:px-4"
@@ -2194,10 +1915,6 @@ export default function App() {
               <span className="max-xl:hidden">{label}</span>
             </button>
           ))}
-          <button onClick={() => setImportOpen(true)} title="Importar enlace" className="flex items-center gap-4 rounded-xl px-3 py-3 text-[15px] text-fg/80 transition hover:bg-surface2">
-            <Plus className="h-6 w-6 shrink-0 rounded-md border-2 border-current p-0.5" strokeWidth={2.5} />
-            <span className="max-xl:hidden">Importar enlace</span>
-          </button>
           <button onClick={() => fileRef.current?.click()} title="Subir post/video" className="flex items-center gap-4 rounded-xl px-3 py-3 text-[15px] text-fg/80 transition hover:bg-surface2">
             <Upload className="h-6 w-6 shrink-0" strokeWidth={1.8} />
             <span className="max-xl:hidden">Subir post/video</span>
@@ -2238,7 +1955,7 @@ export default function App() {
           <UploadZone onFile={handleFile} onPick={() => fileRef.current?.click()} onPaste={() => setDraft({ kind: "text", name: "Texto pegado", text: "" })} />
           {view === "dashboard"
             ? <DashboardView posts={posts} analyses={analyses} onOpen={setSelectedId} goContent={() => setView("content")} />
-            : <ContentView posts={posts} analyses={analyses} onOpen={setSelectedId} onImport={() => setImportOpen(true)} />}
+            : <ContentView posts={posts} analyses={analyses} onOpen={setSelectedId} onUpload={() => fileRef.current?.click()} />}
           <p className="mt-10 text-center text-xs text-muted">Simulador con datos de ejemplo. No está afiliado a Instagram ni a Meta.</p>
         </div>
       </main>
@@ -2249,8 +1966,8 @@ export default function App() {
             <Icon className="h-6 w-6" strokeWidth={view === key ? 2.5 : 1.8} />{label}
           </button>
         ))}
-        <button onClick={() => setImportOpen(true)} className="flex flex-col items-center gap-0.5 px-4 text-[11px] text-muted">
-          <span className="brand-grad grid h-6 w-6 place-items-center rounded-md text-white"><Plus className="h-4 w-4" strokeWidth={3} /></span>Importar
+        <button onClick={() => fileRef.current?.click()} className="flex flex-col items-center gap-0.5 px-4 text-[11px] text-muted">
+          <span className="brand-grad grid h-6 w-6 place-items-center rounded-md text-white"><Upload className="h-4 w-4" strokeWidth={2.5} /></span>Subir
         </button>
       </nav>
 
@@ -2260,7 +1977,6 @@ export default function App() {
         ref={fileRef} id="draft-file" type="file" accept="image/*,video/*,.txt,.md,text/plain" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
       />
-      {importOpen && <ImportModal onClose={() => setImportOpen(false)} onDone={handleImported} existing={posts} />}
       {toast && (
         <div className="anim-pop fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-2 rounded-full bg-fg px-4 py-2.5 text-sm font-medium text-bg shadow-xl md:bottom-8" role="status">
           <CircleCheck className="h-4 w-4 shrink-0" /> <span className="truncate">{toast}</span>

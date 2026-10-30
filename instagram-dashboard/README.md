@@ -26,9 +26,9 @@ node build.mjs deps
 - **Pilares:** Autoridad y Teoría (meta 40%), Detrás de Escena / Proceso (35%), Comunidad y Reflexión (25%).
 - **Índices de conversión:** Autoridad = (guardados + compartidos) / alcance; Intención de compra = comentarios de valor cada 1.000 cuentas; Conexión humana = mensajes directos cada 1.000 cuentas. En la cuenta se usa la mediana por publicación para que un post viral no infle el diagnóstico.
 - **Diagnósticos:** Falta de Puente Comercial, Exceso Académico / Jerga, Falta de Vulnerabilidad, además de comentarios superficiales, reflexiones sin pregunta, gancho débil, alcance cautivo y portada poco legible. Cada uno trae su plan de acción.
-- Los enlaces importados generan métricas simuladas y deterministas: no hay conexión real con Instagram.
+- Los 5 posts de ejemplo tienen métricas simuladas: no hay conexión con Instagram.
 
 ## Revisión antes de publicar
 
-Arrastrá una imagen, un video o un `.txt` a la zona superior (o usá "Subir post/video" / "Pegar texto"). El texto o guion se evalúa con los mismos criterios: gancho, jerga (con glosario y reescritura automática de términos), puente comercial, vulnerabilidad y pregunta abierta. Del archivo visual se miden en el navegador la duración, la proporción y el contraste. El audio del video no se transcribe: el guion se pega a mano. Nada se sube a ningún servidor.
+Es la forma de cargar contenido propio: arrastrá una imagen, un video o un `.txt` a la zona superior (o usá "Subir post/video" / "Pegar texto"). No se importan enlaces de Instagram. El texto o guion se evalúa con los mismos criterios: gancho, jerga (con glosario y reescritura automática de términos), puente comercial, vulnerabilidad y pregunta abierta. Del archivo visual se miden en el navegador la duración, la proporción y el contraste. El audio del video no se transcribe: el guion se pega a mano. Nada se sube a ningún servidor.
 
