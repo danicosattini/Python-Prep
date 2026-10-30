@@ -26,7 +26,7 @@ import {
   Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutGrid, Lightbulb,
   Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
-  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft, ClipboardCheck, Trash2,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft, ClipboardCheck, Trash2, ScanEye, RefreshCw, Square, LoaderCircle as Loader,
 } from "lucide-react";
 
 /* ============================================================
@@ -228,7 +228,7 @@ const GOAL_OF = {
   hook: "crecimiento", captive: "crecimiento", cover: "crecimiento", shares: "crecimiento", follows: "crecimiento",
   noaudio: "crecimiento", silence: "crecimiento", pauses: "crecimiento", volume: "crecimiento", clipping: "crecimiento",
   fast: "crecimiento", length: "crecimiento", ratio: "crecimiento", pace: "crecimiento", static: "crecimiento", dark: "crecimiento",
-  mixedratio: "crecimiento", lowslides: "crecimiento", longcarousel: "crecimiento", shortcarousel: "crecimiento",
+  mixedratio: "crecimiento", lowslides: "crecimiento", longcarousel: "crecimiento", shortcarousel: "crecimiento", noscreentext: "crecimiento",
 };
 const GOAL_ORDER = { captacion: 0, ambos: 0, crecimiento: 1 };
 /** Ordena por gravedad y, a igual gravedad, primero lo que afecta a la captación (objetivo principal). */
@@ -451,7 +451,7 @@ function analyzePost(post) {
       },
     });
   }
-  issues.forEach((i) => (i.goal = GOAL_OF[i.id] || "captacion"));
+  issues.forEach((i) => (i.goal = i.goal || GOAL_OF[i.id] || "captacion"));
   issues.sort(byPriority);
 
   // --- Lo que funcionó
@@ -713,7 +713,116 @@ const FOLLOW_WORDS = ["seguime", "sigueme", "parte 1", "parte 2", "primera parte
 const CURIOSITY = /\?|\d|nadie|error|secreto|por que|lo que|mito|nunca|deja de|dejá de|no es|verdad|cuidado|asi es como|el truco/;
 const NUMBERED = /(^|\s)(\d+|dos|tres|cuatro|cinco|seis|siete|diez)\s+(errores|claves|pasos|preguntas|libros|ejercicios|trucos|senales|razones|cosas|formas|autores|bloqueos)/;
 
-function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues, visual, slides }) {
+/* ------------------------------------------------------------
+ * Lectura visual con Claude (capacidad `sample` con imágenes):
+ * Claude mira las diapositivas o fotogramas, transcribe el texto
+ * de cada imagen y evalúa portada, presencia, proceso y diseño.
+ * ------------------------------------------------------------ */
+
+/** Conexión con Claude: `undefined` mientras se resuelve, `null` si no está disponible en esta vista. */
+function useClaudeVision() {
+  const [cap, setCap] = useState(undefined);
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      try {
+        const fn = await window.claude?.use?.("sample");
+        if (off) return;
+        if (!fn) return setCap(null);
+        const lim = await fn.limits().catch(() => null);
+        if (!off) setCap(lim?.images ? { fn, maxImages: lim.images.maxCount } : null);
+      } catch (e) {
+        if (!off) setCap(null);
+      }
+    })();
+    return () => { off = true; };
+  }, []);
+  return cap;
+}
+
+/** Fotogramas del video como JPEG: el inicio pesa más porque decide si la gente se queda. */
+async function extractFrames(url, max) {
+  const v = document.createElement("video");
+  v.muted = true;
+  v.preload = "auto";
+  v.playsInline = true;
+  v.src = url;
+  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = rej; });
+  const d = v.duration;
+  const times = [0.1, 1.5, 3, d * 0.35, d * 0.6, d * 0.85, d - 0.3]
+    .filter((t, i, arr) => t > 0 && t < d && arr.findIndex((x) => Math.abs(x - t) < 0.8) === i)
+    .slice(0, Math.max(1, max));
+  const w = Math.min(720, v.videoWidth || 720);
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = Math.round((w * (v.videoHeight || 1280)) / (v.videoWidth || 720));
+  const ctx = c.getContext("2d");
+  const blobs = [];
+  for (const t of times) {
+    await new Promise((res) => { v.onseeked = res; v.currentTime = t; });
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    blobs.push(await new Promise((res) => c.toBlob(res, "image/jpeg", 0.85)));
+  }
+  return { blobs: blobs.filter(Boolean), times };
+}
+
+function buildVisionPrompt(kind, n) {
+  const what = kind === "carousel"
+    ? `las ${n} diapositivas de un carrusel de Instagram, en el orden en que se van a publicar (la 1 es la portada)`
+    : kind === "image"
+      ? "la imagen de un post de Instagram"
+      : `${n} fotogramas de un Reel de Instagram, en orden (el primero es el inicio del video y funciona como portada)`;
+  return `Sos consultora de contenido para Instagram. Vas a ver ${what}, antes de que se publique.
+La cuenta es de una socióloga, investigadora y escritora que publica sobre escritura y literatura. Sus objetivos: (1, principal) atraer alumnos para talleres de escritura y mentorías editoriales; (2) crecer: que la descubra gente nueva, la siga, comparta y comente.
+
+Respondé solo con un objeto JSON con estas claves:
+- "textos": lista de strings, una por imagen y en el mismo orden, con el texto que se lee en esa imagen transcripto literalmente ("" si no tiene texto).
+- "portada": objeto con "legible" (true o false: si el texto de la primera imagen se lee bien en el celular) y "comentario" (una frase: si frena el scroll y por qué).
+- "aparece_persona": "si" o "no" (si se ve la cara o las manos de la autora).
+- "muestra_proceso": true o false (si se ve su manuscrito, escritorio, cuaderno, libros o pantalla escribiendo).
+- "texto_en_pantalla": true o false (si hay texto sobreimpreso legible).
+- "calidad_visual": una o dos frases sobre luz, encuadre, tipografía y coherencia de diseño entre imágenes.
+- "observaciones": lista de hasta 4 objetos con "objetivo" ("captacion" o "crecimiento"), "gravedad" ("alta", "media" o "baja"), "titulo" (máximo 6 palabras), "detalle" (qué se ve y por qué es un problema, concreto) y "como_corregir" (una acción concreta).
+
+En "observaciones" poné solo problemas visuales o de diseño que se ven en las imágenes; si no hay, dejá la lista vacía. Nombrá la imagen cuando corresponda (por ejemplo "diapositiva 3"). Escribí en español rioplatense, con voseo.`;
+}
+
+/** Normaliza la respuesta de Claude: nada de lo que llega se da por bien formado. */
+function normalizeVision(raw, n) {
+  const o = raw && typeof raw === "object" ? raw : {};
+  const textos = Array.isArray(o.textos) ? o.textos.map((x) => String(x ?? "").trim()) : [];
+  while (textos.length < n) textos.push("");
+  const obs = Array.isArray(o.observaciones) ? o.observaciones : [];
+  return {
+    textos: textos.slice(0, n),
+    portada: { legible: o.portada?.legible === true ? true : o.portada?.legible === false ? false : null, comentario: String(o.portada?.comentario ?? "") },
+    aparece_persona: o.aparece_persona === "si" || o.aparece_persona === "sí",
+    muestra_proceso: o.muestra_proceso === true,
+    texto_en_pantalla: o.texto_en_pantalla === true ? true : o.texto_en_pantalla === false ? false : null,
+    calidad_visual: String(o.calidad_visual ?? ""),
+    observaciones: obs.slice(0, 4).map((x) => ({
+      objetivo: x?.objetivo === "crecimiento" ? "crecimiento" : "captacion",
+      gravedad: ["alta", "media", "baja"].includes(x?.gravedad) ? x.gravedad : "media",
+      titulo: String(x?.titulo ?? "Observación visual").slice(0, 80),
+      detalle: String(x?.detalle ?? ""),
+      como_corregir: String(x?.como_corregir ?? ""),
+    })).filter((x) => x.detalle || x.como_corregir),
+  };
+}
+
+const VISION_ERRORS = {
+  not_granted: "No diste permiso para que la app use Claude. Podés volver a intentarlo al recargar la página.",
+  sampling_disabled: "Claude no está disponible para tu cuenta en este momento.",
+  images_unavailable: "Esta vista no puede mandar imágenes a Claude.",
+  rate_limited: "Hiciste muchas consultas seguidas o llegaste al límite de uso. Probá de nuevo en un rato.",
+  session_expired: "Tu sesión de Claude venció. Volvé a iniciar sesión y recargá la página.",
+  image_rejected: "Una de las imágenes no se pudo procesar (formato o tamaño). Probá exportarla como JPG o PNG.",
+  refused: "Claude no quiso analizar estas imágenes.",
+  invalid_json: "La respuesta llegó incompleta. Tocá “Volver a leer”.",
+};
+const VISION_PERMANENT = ["not_granted", "sampling_disabled", "images_unavailable", "not_declared", "capability_disabled", "capability_removed"];
+
+function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues, visual, slides, vision }) {
   const text = rawText.trim();
   const nt = norm(text);
   const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
@@ -738,7 +847,7 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   const jargon = words ? Math.round(clamp((jHits / words) * 2500 + Math.max(0, avgLen - 22) * 2.5)) : 0;
   const hasBridge = BRIDGE_WORDS.some((k) => nt.includes(k));
   const processHits = countHits(nt, PROCESS_WORDS);
-  const vulnerability = processHits > 0;
+  const vulnerability = processHits > 0 || !!vision?.muestra_proceso || !!vision?.aparece_persona;
   const tail = nt.slice(Math.floor(nt.length * 0.6));
   const openQuestion = tail.includes("?") || COMMUNITY_WORDS.slice(0, 8).some((k) => tail.includes(k));
   const pillarScores = {
@@ -1119,7 +1228,34 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
       });
     }
   }
-  issues.forEach((i) => (i.goal = GOAL_OF[i.id] || "captacion"));
+  // --- Lo que vio Claude en las imágenes
+  if (vision) {
+    if (vision.portada.legible === true) {
+      // Claude leyó la portada sin problema: el aviso por contraste medido sería un falso positivo
+      for (let k = issues.length - 1; k >= 0; k--) if (issues[k].id === "cover") issues.splice(k, 1);
+    } else if (vision.portada.legible === false && !issues.some((i) => i.id === "cover")) {
+      issues.push({
+        id: "cover", sev: "media", icon: ImageIcon, title: "Portada poco legible",
+        why: vision.portada.comentario || "El texto de la portada no se lee bien en el celular.",
+        fix: { title: "Portada con contraste y una promesa concreta", steps: ["Máximo 6 palabras, en tipografía gruesa.", "Texto claro sobre fondo oscuro o al revés."] },
+      });
+    }
+    if (kind === "video" && vision.texto_en_pantalla === false) {
+      issues.push({
+        id: "noscreentext", sev: "media", icon: Captions, title: "Sin texto en pantalla",
+        why: "En los fotogramas no aparece texto sobreimpreso. Quien mira sin sonido no sabe de qué trata el video y lo pasa.",
+        fix: { title: "Escribí el gancho en pantalla y subtitulá", steps: ["Poné el gancho como texto grande en los primeros 3 segundos.", "Sumá subtítulos de 3 a 5 palabras por bloque."] },
+      });
+    }
+    vision.observaciones.forEach((o, k) => {
+      issues.push({
+        id: `vision${k}`, source: "claude", goal: o.objetivo, sev: o.gravedad, icon: ScanEye,
+        title: o.titulo, why: o.detalle,
+        fix: { title: o.como_corregir || o.titulo, steps: [] },
+      });
+    });
+  }
+  issues.forEach((i) => (i.goal = i.goal || GOAL_OF[i.id] || "captacion"));
   issues.sort(byPriority);
 
   const strengths = [];
@@ -1135,6 +1271,8 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   if (kind === "carousel" && slides?.length >= 5 && slides.length <= 10 && new Set(slides.filter((x) => x.width).map((x) => (x.height / x.width).toFixed(2))).size <= 1) {
     strengths.push(`Buena extensión: ${slides.length} diapositivas con la misma proporción.`);
   }
+  if (vision?.portada.legible === true && vision.portada.comentario) strengths.push(`Portada: ${vision.portada.comentario}`);
+  if (vision?.aparece_persona) strengths.push("Aparecés vos: la gente conecta con una persona, no con un tema.");
   if (kind === "video" && visual && visual.avgShot <= 2.5) strengths.push(`Ritmo visual ágil: un plano cada ${dec(visual.avgShot)} s.`);
 
   const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
@@ -1779,6 +1917,81 @@ function AnalysisPanel({ post, analysis, onClose }) {
   );
 }
 
+/** Lo que Claude leyó y vio en las imágenes o fotogramas. */
+function VisionCard({ cap, vis, kind, texts, slides, unread, onRun, onStop }) {
+  const unit = kind === "video" ? "fotogramas" : kind === "carousel" ? "diapositivas" : "imagen";
+  if (cap === undefined) {
+    return <Card className="flex items-center gap-3 p-5 text-sm text-muted"><ScanEye className="h-4 w-4 animate-pulse text-accent" /> Conectando con Claude…</Card>;
+  }
+  if (cap === null) {
+    return (
+      <Card className="flex items-start gap-3 p-5 text-sm leading-relaxed text-muted">
+        <ScanEye className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>La lectura de las imágenes la hace Claude y solo funciona con la app abierta dentro de claude.ai. Abrila desde ahí para que lea el texto de cada {kind === "video" ? "fotograma" : "imagen"} y evalúe el diseño; mientras tanto, se analizan formato, contraste y lo que pegues abajo.</span>
+      </Card>
+    );
+  }
+  const head = (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <h4 className="flex items-center gap-2 text-sm font-semibold"><ScanEye className="h-4 w-4 text-accent" /> Lectura de las imágenes con Claude</h4>
+      {vis.status === "loading" ? (
+        <button onClick={onStop} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs font-semibold hover:bg-surface2"><Square className="h-3 w-3" /> Detener</button>
+      ) : vis.status !== "error" || !VISION_PERMANENT.includes(vis.code) ? (
+        <button onClick={onRun} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs font-semibold hover:bg-surface2"><RefreshCw className="h-3 w-3" /> {vis.status === "done" ? "Volver a leer" : "Leer las imágenes"}</button>
+      ) : null}
+    </div>
+  );
+  if (vis.status === "loading") {
+    return (
+      <Card className="p-5">
+        {head}
+        <p className="flex items-center gap-2 text-sm text-muted"><Loader className="h-4 w-4 animate-spin text-accent" /> Claude está mirando {kind === "image" ? "la imagen" : `las ${unit}`}. Puede tardar hasta un minuto; la primera vez te pide permiso.</p>
+      </Card>
+    );
+  }
+  if (vis.status === "error") {
+    return <Card className="p-5">{head}<p className="text-sm text-muted">{VISION_ERRORS[vis.code] || "No se pudo completar la lectura. Tocá “Leer las imágenes” para intentar de nuevo."}</p></Card>;
+  }
+  if (vis.status !== "done") {
+    return <Card className="p-5">{head}<p className="text-sm text-muted">Tocá “Leer las imágenes” para que Claude transcriba el texto de {kind === "image" ? "la imagen" : `las ${unit}`} y evalúe el diseño.</p></Card>;
+  }
+  const d = vis.data;
+  const chips = [
+    { l: "Portada legible", v: d.portada.legible == null ? "—" : d.portada.legible ? "Sí" : "No", ok: d.portada.legible },
+    { l: "Aparecés vos", v: d.aparece_persona ? "Sí" : "No", ok: d.aparece_persona },
+    { l: "Se ve tu proceso", v: d.muestra_proceso ? "Sí" : "No", ok: d.muestra_proceso },
+    { l: "Texto en pantalla", v: d.texto_en_pantalla == null ? "—" : d.texto_en_pantalla ? "Sí" : "No", ok: d.texto_en_pantalla },
+  ];
+  return (
+    <Card className="p-5">
+      {head}
+      {unread > 0 && <p className="mb-3 rounded-xl bg-warn/12 p-3 text-xs text-warn">Hay {unread} {unread === 1 ? "diapositiva nueva que Claude todavía no leyó" : "diapositivas nuevas que Claude todavía no leyó"}. Tocá “Volver a leer”.</p>}
+      {kind === "carousel" && vis.total > vis.keys.length && <p className="mb-3 text-xs text-muted">Claude leyó las primeras {vis.keys.length} de {vis.total} diapositivas (máximo por consulta).</p>}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {chips.map((c) => (
+          <div key={c.l} className="rounded-xl bg-surface2 p-3">
+            <div className={cx("font-mono text-lg font-semibold", c.ok === true ? "text-good" : c.ok === false ? "text-warn" : "")}>{c.v}</div>
+            <div className="text-[11px] leading-tight text-muted">{c.l}</div>
+          </div>
+        ))}
+      </div>
+      {d.portada.comentario && <p className="mt-3 text-sm leading-relaxed"><span className="font-semibold">Portada: </span>{d.portada.comentario}</p>}
+      {d.calidad_visual && <p className="mt-2 text-sm leading-relaxed"><span className="font-semibold">Diseño: </span>{d.calidad_visual}</p>}
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-semibold text-muted">Texto que se lee en {kind === "video" ? "los fotogramas" : kind === "carousel" ? "cada diapositiva" : "la imagen"}</div>
+        <ol className="space-y-1.5">
+          {(kind === "video" ? vis.keys : kind === "carousel" ? slides.map((x, i) => i) : [0]).map((key, i) => (
+            <li key={String(key)} className="flex gap-3 rounded-lg bg-surface2 px-3 py-2 text-sm">
+              <span className="w-12 shrink-0 font-mono text-xs text-muted">{kind === "video" ? key : kind === "carousel" ? `D${i + 1}` : "Imagen"}</span>
+              <span className={cx("min-w-0", !texts[i] && "italic text-muted")}>{texts[i] || "sin texto"}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </Card>
+  );
+}
+
 /** Imagen del video: cortes de plano, ritmo, luz y movimiento al inicio. */
 function VisualCard({ visual }) {
   if (!visual) {
@@ -1940,7 +2153,7 @@ function SlideStrip({ slides, onMove, onRemove, onAdd }) {
 }
 
 /** Revisión antes de publicar: carga el archivo, mide lo que puede y muestra el plan de acción. */
-function DraftPanel({ draft, onClose, onSave }) {
+function DraftPanel({ draft, onClose, onSave, claudeVision }) {
   const [text, setText] = useState(draft.text || "");
   const [pillar, setPillar] = useState("auto");
   const [media, setMedia] = useState(null);
@@ -1974,7 +2187,7 @@ function DraftPanel({ draft, onClose, onSave }) {
     return next;
   });
   const removeSlide = (i) => setSlides((list) => list.filter((_, k) => k !== i));
-  const addSlides = (files) => setSlides((list) => [...list, ...files.filter((f) => (f.type || "").startsWith("image/")).sort(naturalByName).map((f) => ({ name: f.name, url: URL.createObjectURL(f) }))]);
+  const addSlides = (files) => setSlides((list) => [...list, ...files.filter((f) => (f.type || "").startsWith("image/")).sort(naturalByName).map((f) => ({ name: f.name, url: URL.createObjectURL(f), file: f }))]);
   const panelRef = useRef(null);
 
   // Audio: se decodifica la pista del video en el navegador
@@ -2026,8 +2239,58 @@ function DraftPanel({ draft, onClose, onSave }) {
     return () => { cancelled = true; };
   }, [draft]);
 
+  // --- Lectura visual con Claude
+  const [vis, setVis] = useState({ status: "idle" });
+  const visCtl = useRef(null);
+  const visual_kind = ["image", "carousel", "video"].includes(draft.kind);
+  const runVision = async () => {
+    if (!claudeVision) return;
+    visCtl.current?.abort();
+    const ctl = new AbortController();
+    visCtl.current = ctl;
+    setVis({ status: "loading" });
+    try {
+      let blobs, keys;
+      if (draft.kind === "carousel") {
+        const list = slides.slice(0, claudeVision.maxImages);
+        blobs = list.map((x) => x.file);
+        keys = list.map((x) => x.url);
+      } else if (draft.kind === "image") {
+        blobs = [draft.file];
+        keys = [draft.url];
+      } else {
+        const fr = await extractFrames(draft.url, Math.min(6, claudeVision.maxImages));
+        blobs = fr.blobs;
+        keys = fr.times.map((t) => `${dec(t)} s`);
+      }
+      const raw = await claudeVision.fn.json(buildVisionPrompt(draft.kind, blobs.length), { images: blobs, signal: ctl.signal });
+      setVis({ status: "done", data: normalizeVision(raw, blobs.length), keys, total: draft.kind === "carousel" ? slides.length : blobs.length });
+    } catch (e) {
+      if (e?.code === "cancelled") return setVis({ status: "idle", stopped: true });
+      setVis({ status: "error", code: e?.code || "upstream_error" });
+    }
+  };
+  // Se lee una vez al abrir; después, solo si lo pedís (cada lectura usa tu cuenta de Claude)
+  useEffect(() => {
+    if (claudeVision && visual_kind && vis.status === "idle" && !vis.stopped) runVision();
+  }, [claudeVision]);
+  useEffect(() => () => visCtl.current?.abort(), []);
+
+  // Texto leído de las imágenes, en el orden actual de las diapositivas
+  const visionData = vis.status === "done" ? vis.data : null;
+  const visionTexts = visionData
+    ? draft.kind === "carousel"
+      ? (slides || []).map((x) => { const k = vis.keys.indexOf(x.url); return k >= 0 ? visionData.textos[k] : ""; })
+      : visionData.textos
+    : [];
+  const visionText = draft.kind === "video"
+    ? Array.from(new Set(visionTexts.filter(Boolean))).join("\n")
+    : visionTexts.filter(Boolean).join("\n");
+  const unreadSlides = draft.kind === "carousel" && visionData ? (slides || []).filter((x) => !vis.keys.includes(x.url)).length : 0;
+  const fullText = draft.kind === "video" ? [text, visionText].filter((x) => x.trim()).join("\n\n") : [visionText, text].filter((x) => x.trim()).join("\n\n");
+
   const audioReady = audio && audio !== "loading" && !audio.error ? audio : null;
-  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues, visual, slides }), [draft.kind, text, pillar, media, audioReady, cues, visual, slides]);
+  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text: fullText, pillar, media, audio: audioReady, cues, visual, slides, vision: visionData }), [draft.kind, fullText, pillar, media, audioReady, cues, visual, slides, visionData]);
   const Kind = DRAFT_KIND[draft.kind];
   const hasText = analysis.words > 0;
   const save = () => {
@@ -2106,19 +2369,21 @@ function DraftPanel({ draft, onClose, onSave }) {
               </div>
               <div>
                 <label htmlFor="draft-text" className="mb-1.5 block text-xs font-semibold text-muted">
-                  {draft.kind === "video" ? "Texto del post o guion del video" : draft.kind === "carousel" ? "Texto del post y de las diapositivas" : "Texto del post"}
+                  {draft.kind === "video" ? "Descripción del post o guion del video" : visual_kind ? "Descripción del post (el texto que va debajo)" : "Texto del post"}
                 </label>
                 <textarea
                   id="draft-text" value={text} onChange={(e) => setText(e.target.value)} rows={7}
-                  placeholder={draft.kind === "video" ? "Pegá acá lo que decís en el video y el texto que va a acompañar al Reel…" : draft.kind === "carousel" ? "Empezá por el texto de la portada, seguí con el de cada diapositiva y después el texto del post…" : "Pegá acá el texto que vas a publicar…"}
+                  placeholder={draft.kind === "video" ? "Pegá acá la descripción del Reel (y, si querés, lo que decís en el video)…" : visual_kind ? "Pegá acá la descripción que va a acompañar al post…" : "Pegá acá el texto que vas a publicar…"}
                   className="w-full resize-y rounded-xl border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition placeholder:text-muted focus:border-accent"
                 />
                 <p className="mt-1.5 text-xs text-muted">
                   {draft.kind === "video"
                     ? "El audio se analiza solo (silencios, pausas, volumen). Para analizar lo que decís, cargá los subtítulos que exporta CapCut o Edits, o pegá el guion."
-                    : draft.kind === "carousel"
-                      ? "De las imágenes se mide proporción y contraste; lo que dicen no se lee. Para analizar el gancho y el llamado a la acción, pegá el texto empezando por la portada."
-                      : "El análisis se actualiza mientras escribís."}
+                    : visual_kind && claudeVision
+                      ? "El texto de las imágenes lo lee Claude solo. Acá va únicamente la descripción del post."
+                      : visual_kind
+                        ? "La lectura automática de las imágenes funciona con la app abierta dentro de claude.ai. Fuera de ahí, pegá acá también el texto de las imágenes."
+                        : "El análisis se actualiza mientras escribís."}
                 </p>
                 {draft.kind === "video" && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -2140,6 +2405,13 @@ function DraftPanel({ draft, onClose, onSave }) {
               </div>
             </div>
           </div>
+
+          {visual_kind && (
+            <VisionCard
+              cap={claudeVision} vis={vis} kind={draft.kind} texts={visionTexts} slides={slides} unread={unreadSlides}
+              onRun={runVision} onStop={() => visCtl.current?.abort()}
+            />
+          )}
 
           {draft.kind === "video" && (
             <div className="space-y-4">
@@ -2166,6 +2438,7 @@ function DraftPanel({ draft, onClose, onSave }) {
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-semibold">{i.title}</span>
+                              {i.source === "claude" && <span className="inline-flex items-center gap-1 rounded-full bg-p1/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-p1"><ScanEye className="h-3 w-3" />Visto por Claude</span>}
                               <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", SEV_STYLE[i.sev])}>{i.sev}</span>
                           {i.goal && <GoalTag goal={i.goal} />}
                             </div>
@@ -2512,6 +2785,7 @@ export default function App() {
   const analyses = useMemo(() => Object.fromEntries(posts.map((p) => [p.id, analyzePost(p)])), [posts]);
   const [view, setView] = useState("review");
   const [history, setHistory] = useState(loadHistory);
+  const claudeVision = useClaudeVision();
   const [selectedId, setSelectedId] = useState(null);
   const [toast, setToast] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -2545,12 +2819,12 @@ export default function App() {
       setDraft({
         kind: "carousel",
         name: `Carrusel de ${images.length} diapositivas`,
-        slides: images.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })),
+        slides: images.map((f) => ({ name: f.name, url: URL.createObjectURL(f), file: f })),
         text: textFile ? await textFile.text() : "",
       });
     } else if (images.length === 1 && textFile) {
       if (draft?.url) URL.revokeObjectURL(draft.url);
-      setDraft({ kind: "image", name: images[0].name, url: URL.createObjectURL(images[0]), text: await textFile.text() });
+      setDraft({ kind: "image", name: images[0].name, url: URL.createObjectURL(images[0]), file: images[0], text: await textFile.text() });
     } else if (files.length) {
       handleFile(files[0]);
     }
@@ -2558,7 +2832,7 @@ export default function App() {
   const handleFile = async (file) => {
     const type = file.type || "";
     if (draft?.url) URL.revokeObjectURL(draft.url);
-    if (type.startsWith("image/")) setDraft({ kind: "image", name: file.name, url: URL.createObjectURL(file), text: "" });
+    if (type.startsWith("image/")) setDraft({ kind: "image", name: file.name, url: URL.createObjectURL(file), file, text: "" });
     else if (type.startsWith("video/") || /\.(mov|mp4|m4v|webm)$/i.test(file.name)) setDraft({ kind: "video", name: file.name, url: URL.createObjectURL(file), file, text: "" });
     else if (/\.(srt|vtt)$/i.test(file.name)) {
       const cues = parseSubtitles(await file.text());
@@ -2649,7 +2923,7 @@ export default function App() {
       </nav>
 
       {selected && <AnalysisPanel post={selected} analysis={analyses[selected.id]} onClose={() => setSelectedId(null)} />}
-      {draft && <DraftPanel key={draft.url || draft.slides?.[0]?.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} onSave={(rec) => { addReview(rec); setToast("Revisión guardada en “Mis revisiones”."); }} />}
+      {draft && <DraftPanel key={draft.url || draft.slides?.[0]?.url || draft.name + draft.text.length} draft={draft} claudeVision={claudeVision} onClose={closeDraft} onSave={(rec) => { addReview(rec); setToast("Revisión guardada en “Mis revisiones”."); }} />}
       <input
         ref={fileRef} id="draft-file" type="file" multiple accept="image/*,video/*,.mov,.txt,.md,.srt,.vtt,text/plain" className="hidden"
         onChange={(e) => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }}
