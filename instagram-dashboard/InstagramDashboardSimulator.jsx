@@ -10,7 +10,7 @@
  *   1. Utilidades y formato
  *   2. Datos: pilares de contenido, publicaciones de ejemplo y generador de importadas
  *   3. Motor de análisis: índices de conversión, semáforo, diagnóstico y plan de acción
- *   4. Diagnóstico estratégico de la cuenta (mezcla de pilares, puente comercial, jerga)
+ *   4. (sin datos de cuenta: la app no conoce tu perfil)
  *   4b. Revisión antes de publicar: analiza un archivo subido (texto, imagen o video)
  *   5. Componentes visuales
  *   6. Vistas: Resumen, Contenido, Análisis profundo, Revisión antes de publicar
@@ -23,10 +23,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, ArrowUpRight, BookOpen, Bookmark, BookmarkCheck, Briefcase, ChevronRight, CircleCheck,
   CircleX, Clapperboard, Clock, Copy, Check, Eye, Feather, Filter, GalleryHorizontalEnd, GraduationCap,
-  Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb,
+  Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutGrid, Lightbulb,
   Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
-  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft, ClipboardCheck, Trash2,
 } from "lucide-react";
 
 /* ============================================================
@@ -41,13 +41,6 @@ const dec = (n, d = 1) => n.toFixed(d).replace(".", ",");
 const clamp = (v, a = 0, b = 100) => Math.min(b, Math.max(a, v));
 const dateFmt = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 const cx = (...c) => c.filter(Boolean).join(" ");
-
-const ACCOUNT = {
-  handle: "@tu.cuaderno",
-  name: "Socióloga · Investigadora · Escritora",
-  followers: 6840,
-  offer: "talleres de escritura y mentorías editoriales",
-};
 
 /* ============================================================
  * 2. Datos
@@ -501,111 +494,6 @@ function analyzePost(post) {
     score, status, capScore, growScore, groups, signals, issues, strengths, plan, ret3, avgWatch, swipe, completion, ...idx,
     reachNew: m.nonFollowerPct, shares: sharesK, follows: followsK,
   };
-}
-
-/* ============================================================
- * 4. Diagnóstico estratégico de la cuenta
- * ============================================================ */
-function analyzeAccount(posts, analyses) {
-  const sum = (list, f) => list.reduce((acc, p) => acc + f(p), 0);
-  const reach = sum(posts, (p) => p.metrics.reach);
-  // Mediana por publicación: describe el post típico y no se deja arrastrar por un solo post viral.
-  const median = (vals) => {
-    const v = [...vals].sort((a, b) => a - b);
-    const mid = Math.floor(v.length / 2);
-    return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
-  };
-  const kpis = Object.fromEntries(Object.keys(KPI).map((k) => [k, median(posts.map((p) => analyses[p.id][k]))]));
-  const kpisWeighted = {
-    authority: (sum(posts, (p) => p.metrics.saves + p.metrics.shares) / reach) * 100,
-    intent: (sum(posts, (p) => p.metrics.comments.value) / reach) * 1000,
-    connection: (sum(posts, (p) => p.metrics.dms) / reach) * 1000,
-    reachNew: (sum(posts, (p) => (p.metrics.reach * p.metrics.nonFollowerPct) / 100) / reach) * 100,
-    shares: (sum(posts, (p) => p.metrics.shares) / reach) * 1000,
-    follows: (sum(posts, (p) => p.metrics.follows) / reach) * 1000,
-  };
-  const growth = Math.round(
-    scoreFrom(kpis.reachNew, KPI.reachNew.red, KPI.reachNew.green) * 0.35 +
-      scoreFrom(kpis.shares, KPI.shares.red, KPI.shares.green) * 0.35 +
-      scoreFrom(kpis.follows, KPI.follows.red, KPI.follows.green) * 0.3
-  );
-  const kpiStatus = Object.fromEntries(Object.entries(kpis).map(([k, v]) => [k, statusOf(scoreFrom(v, KPI[k].red, KPI[k].green))]));
-  const readiness = Math.round(
-    (scoreFrom(kpis.authority, KPI.authority.red, KPI.authority.green) * 0.35 +
-      scoreFrom(kpis.intent, KPI.intent.red, KPI.intent.green) * 0.35 +
-      scoreFrom(kpis.connection, KPI.connection.red, KPI.connection.green) * 0.3)
-  );
-
-  const pillars = PILLAR_KEYS.map((k) => {
-    const list = posts.filter((p) => p.pillar === k);
-    const r = sum(list, (p) => p.metrics.reach) || 1;
-    return {
-      key: k,
-      count: list.length,
-      share: posts.length ? (list.length / posts.length) * 100 : 0,
-      authority: list.length ? (sum(list, (p) => p.metrics.saves + p.metrics.shares) / r) * 100 : 0,
-      intent: list.length ? (sum(list, (p) => p.metrics.comments.value) / r) * 1000 : 0,
-      connection: list.length ? (sum(list, (p) => p.metrics.dms) / r) * 1000 : 0,
-      dms: sum(list, (p) => p.metrics.dms),
-      inquiries: sum(list, (p) => p.metrics.dmInquiries),
-    };
-  });
-
-  const funnel = [
-    { label: "Cuentas alcanzadas", value: reach, icon: Eye },
-    { label: "Visitas al perfil", value: sum(posts, (p) => p.metrics.profileVisits), icon: UserPlus },
-    { label: "Seguidores nuevos", value: sum(posts, (p) => p.metrics.follows), icon: Users },
-    { label: "Mensajes directos", value: sum(posts, (p) => p.metrics.dms), icon: Mail },
-    { label: "Consultas por talleres", value: sum(posts, (p) => p.metrics.dmInquiries), icon: GraduationCap },
-  ];
-
-  // Hallazgos de cuenta
-  const findings = [];
-  const proceso = pillars.find((p) => p.key === "proceso");
-  const totalDms = sum(posts, (p) => p.metrics.dms) || 1;
-  if (proceso.share < 30) {
-    findings.push({
-      id: "vulnerability", sev: "alta", icon: Feather, title: "Falta de Vulnerabilidad",
-      why: `Solo ${proceso.count} de ${posts.length} publicaciones muestran tu novela o tu proceso (${pct(proceso.share, 0)}), y ${proceso.count === 1 ? "esa generó" : "esas generaron"} el ${pct((proceso.dms / totalDms) * 100, 0)} de todos tus mensajes directos.`,
-      fix: "Muestras mucha teoría pero poco de tu novela. La gente compra mentorías a personas, no a enciclopedias. Muestra más tu pantalla escribiendo: llevá el pilar Proceso al 35% (1 de cada 3 publicaciones).",
-    });
-  }
-  const authorityPosts = posts.filter((p) => p.pillar === "autoridad");
-  const noBridge = authorityPosts.filter((p) => !p.attrs.commercialBridge);
-  if (authorityPosts.length && noBridge.length / authorityPosts.length >= 0.5) {
-    const lostSaves = sum(noBridge, (p) => p.metrics.saves);
-    findings.push({
-      id: "bridge", sev: "alta", icon: Briefcase, title: "Falta de Puente Comercial",
-      why: `${noBridge.length} de ${authorityPosts.length} posts de autoridad no mencionan que das talleres. Suman ${full(lostSaves)} guardados de gente que valora lo que enseñás y no sabe que puede estudiarlo con vos.`,
-      fix: "Agregá a todo post de Autoridad una frase final del tipo: “Si querés estructurar tu historia así, seguime para no perderte mis próximos talleres”.",
-    });
-  }
-  const jargonPosts = posts.filter((p) => p.attrs.jargon >= 60);
-  if (jargonPosts.length) {
-    const avgJ = sum(jargonPosts, (p) => p.metrics.reach) / jargonPosts.length;
-    const others = posts.filter((p) => p.attrs.jargon < 60);
-    const avgO = others.length ? sum(others, (p) => p.metrics.reach) / others.length : avgJ;
-    findings.push({
-      id: "jargon", sev: "media", icon: Languages, title: "Exceso Académico / Jerga",
-      why: `${jargonPosts.length} ${jargonPosts.length === 1 ? "publicación usa" : "publicaciones usan"} lenguaje muy técnico y alcanzan en promedio ${fmt(avgJ)} cuentas, contra ${fmt(avgO)} del resto.`,
-      fix: "Estás hablando como investigadora para otros investigadores. Tu diferencial es la mirada sociológica, pero tu cliente es un escritor aficionado: explicá con su problema, no con tu marco teórico.",
-    });
-  }
-  const bestIntent = [...pillars].filter((p) => p.count).sort((a, b) => b.intent - a.intent)[0];
-  const bestConn = [...pillars].filter((p) => p.count).sort((a, b) => b.connection - a.connection)[0];
-  const bestAuth = [...pillars].filter((p) => p.count).sort((a, b) => b.authority - a.authority)[0];
-
-  const issueMap = {};
-  posts.forEach((p) =>
-    analyses[p.id].issues.forEach((i) => {
-      issueMap[i.id] = issueMap[i.id] || { ...i, count: 0 };
-      issueMap[i.id].count++;
-    })
-  );
-  const recurring = Object.values(issueMap).sort((a, b) => b.count - a.count || SEV_ORDER[a.sev] - SEV_ORDER[b.sev]).slice(0, 5);
-  const ranked = [...posts].sort((a, b) => analyses[b.id].score - analyses[a.id].score);
-
-  return { reach, kpis, kpisWeighted, kpiStatus, readiness, growth, pillars, funnel, findings, bestIntent, bestConn, bestAuth, recurring, ranked };
 }
 
 /* ============================================================
@@ -1488,14 +1376,6 @@ function Lights({ status, size = "sm" }) {
   );
 }
 
-function GoalHeading({ goal }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h2 className="font-display text-lg font-bold">{GOALS[goal].label}</h2>
-      <span className="text-sm text-muted">{GOALS[goal].sub} · peso {Math.round(GOAL_WEIGHT[goal] * 100)}%</span>
-    </div>
-  );
-}
 function GoalTag({ goal }) {
   return <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", GOALS[goal].tag)}>{GOALS[goal].label}</span>;
 }
@@ -1549,236 +1429,6 @@ function TrafficLightPanel({ analysis }) {
 /* ============================================================
  * 6. Vistas
  * ============================================================ */
-function KpiCard({ k, value, weighted, status, icon: Icon, explain }) {
-  const meta = KPI[k];
-  const max = meta.green * 2;
-  const pos = (v) => `${clamp((v / max) * 100)}%`;
-  return (
-    <Card className="flex flex-col gap-3 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-display text-[15px] font-bold leading-tight">{meta.label}</div>
-          <div className="mt-0.5 text-xs text-muted">{meta.sub} · post típico (mediana)</div>
-        </div>
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface2"><Icon className="h-4 w-4" /></span>
-      </div>
-      <div className="flex items-end justify-between gap-3">
-        <div className="font-display text-[38px] font-bold leading-none tracking-tight tabular-nums">
-          {meta.unit === "%" ? pct(value) : <>{dec(value)}<span className="ml-1 text-xl text-muted">‰</span></>}
-        </div>
-        <StatusPill status={status} />
-      </div>
-      <div className="relative h-2 rounded-full bg-surface2">
-        <div className={cx("absolute inset-y-0 left-0 rounded-full", STATUS[status].dot)} style={{ width: pos(value) }} />
-        <span className="absolute -top-1 h-4 w-px bg-fg/40" style={{ left: pos(meta.red) }} />
-        <span className="absolute -top-1 h-4 w-px bg-fg/40" style={{ left: pos(meta.green) }} />
-      </div>
-      <div className="flex justify-between font-mono text-[10px] text-muted">
-        <span>débil &lt; {dec(meta.red)}</span><span>sólido ≥ {dec(meta.green)}</span>
-      </div>
-      <p className="text-xs leading-relaxed text-muted">{explain}</p>
-      <p className="border-t border-line pt-2 font-mono text-[11px] text-muted">
-        Total ponderado por alcance: {meta.unit === "%" ? pct(weighted) : `${dec(weighted)} ‰`}
-        {weighted > value * 1.5 ? " · un post muy viral infla el total" : ""}
-      </p>
-    </Card>
-  );
-}
-
-function PostRow({ post, analysis, onOpen }) {
-  return (
-    <button onClick={() => onOpen(post.id)} className="group flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-surface2">
-      <Cover post={post} showMeta={false} className="aspect-[4/5] w-11 shrink-0 rounded-lg" />
-      <div className="min-w-0 flex-1">
-        <div className="line-clamp-2 text-sm font-semibold leading-snug">{post.title}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted"><PillarTag pillar={post.pillar} /> {TYPE_META[post.type].label} · {analysis.score} pts</div>
-      </div>
-      <StatusPill status={analysis.status} />
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted transition group-hover:translate-x-0.5" />
-    </button>
-  );
-}
-
-function DashboardView({ posts, analyses, onOpen, goContent }) {
-  const acc = useMemo(() => analyzeAccount(posts, analyses), [posts, analyses]);
-  const rStatus = statusOf(acc.readiness);
-  const readinessText = {
-    good: "Tu contenido ya construye autoridad y genera conversaciones de venta. Es buen momento para abrir la lista de espera.",
-    warn: "Tenés autoridad, pero todavía no la convertís en clientes. Corregí los hallazgos de abajo antes de lanzar.",
-    bad: "Todavía no hay señales suficientes de demanda. Validá con más contenido de proceso y comunidad antes de lanzar.",
-  }[rStatus];
-  const top = acc.ranked.slice(0, 2);
-  const bottom = acc.ranked.slice(-2).reverse();
-  const funnelMax = acc.funnel[0].value;
-
-  return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
-          <p className="font-mono text-xs uppercase tracking-[0.16em] text-muted">{ACCOUNT.handle} · {full(ACCOUNT.followers)} seguidores</p>
-          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl">¿Tu contenido atrae alumnos?</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">Validación de audiencia para {ACCOUNT.offer}. {posts.length} publicaciones analizadas.</p>
-        </div>
-        <button onClick={goContent} className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-sm font-semibold transition hover:bg-surface2">
-          Ver publicaciones <ArrowUpRight className="h-4 w-4" />
-        </button>
-      </header>
-
-      <Card className={cx("flex flex-col gap-5 p-5 sm:flex-row sm:items-center", STATUS[rStatus].soft)}>
-        <ScoreRing score={acc.readiness} status={rStatus} size={96} stroke={8} label="de 100" />
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted">Preparación para lanzar talleres</p>
-          <p className={cx("mt-1 font-display text-xl font-bold", STATUS[rStatus].text)}>{STATUS[rStatus].long}</p>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed">{readinessText}</p>
-          <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-muted">Potencial de crecimiento:</span>
-            <span className="font-mono font-semibold tabular-nums">{acc.growth}/100</span>
-            <StatusPill status={statusOf(acc.growth)} />
-          </p>
-        </div>
-        <div className="grid shrink-0 grid-cols-3 gap-4 text-center sm:grid-cols-1 sm:gap-2 sm:text-left">
-          {[
-            ["Más autoridad", acc.bestAuth],
-            ["Más intención", acc.bestIntent],
-            ["Más conexión", acc.bestConn],
-          ].map(([l, p]) => (
-            <div key={l} className="text-xs">
-              <span className="text-muted">{l}: </span>
-              <span className={cx("font-semibold", PILLARS[p.key].text)}>{PILLARS[p.key].short}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <GoalHeading goal="captacion" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <KpiCard k="authority" value={acc.kpis.authority} weighted={acc.kpisWeighted.authority} status={acc.kpiStatus.authority} icon={BookmarkCheck}
-          explain="Cuánta gente guardó o compartió tus análisis y herramientas. Es la señal de que te ven como alguien de quien aprender." />
-        <KpiCard k="intent" value={acc.kpis.intent} weighted={acc.kpisWeighted.intent} status={acc.kpiStatus.intent} icon={MessageSquareQuote}
-          explain="Comentarios que preguntan, debaten o cuentan su propio problema de escritura. Los emojis no cuentan." />
-        <KpiCard k="connection" value={acc.kpis.connection} weighted={acc.kpisWeighted.connection} status={acc.kpiStatus.connection} icon={HeartHandshake}
-          explain="Mensajes directos por cada mil cuentas. Es interés real en vos y tu proceso: de acá salen las mentorías." />
-      </div>
-
-      <GoalHeading goal="crecimiento" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <KpiCard k="reachNew" value={acc.kpis.reachNew} weighted={acc.kpisWeighted.reachNew} status={acc.kpiStatus.reachNew} icon={Users}
-          explain="Cuánto del alcance llega a gente que todavía no te sigue. Es lo que hace crecer la cuenta: sin esto, le hablás siempre a los mismos." />
-        <KpiCard k="shares" value={acc.kpis.shares} weighted={acc.kpisWeighted.shares} status={acc.kpiStatus.shares} icon={Repeat2}
-          explain="Envíos por mensaje y compartidos en historias. Es la señal que más empuja una publicación hacia afuera de tu comunidad." />
-        <KpiCard k="follows" value={acc.kpis.follows} weighted={acc.kpisWeighted.follows} status={acc.kpiStatus.follows} icon={UserPlus}
-          explain="Cuántas personas te siguen después de ver una publicación. Mide si tu contenido promete algo que vale la pena seguir." />
-      </div>
-
-      <Card className="p-5">
-        <SectionTitle icon={Target} aside={<span className="text-xs text-muted">Hallazgos sobre el conjunto de la cuenta</span>}>Diagnóstico estratégico</SectionTitle>
-        {acc.findings.length ? (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-            {acc.findings.map((f) => (
-              <div key={f.id} className="flex flex-col gap-2 rounded-2xl border border-line p-4">
-                <div className="flex items-center gap-2">
-                  <span className={cx("grid h-8 w-8 place-items-center rounded-full", SEV_STYLE[f.sev])}><f.icon className="h-4 w-4" /></span>
-                  <span className="font-semibold">{f.title}</span>
-                </div>
-                <p className="text-sm leading-relaxed text-muted">{f.why}</p>
-                <p className="mt-auto rounded-xl bg-surface2 p-3 text-sm leading-relaxed"><span className="font-semibold">Qué hacer: </span>{f.fix}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted">No hay problemas estructurales en la cuenta. Seguí con la mezcla actual de pilares.</p>
-        )}
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <Card className="p-5 lg:col-span-3">
-          <SectionTitle icon={LayoutGrid} aside={<span className="text-xs text-muted">Actual vs. recomendado</span>}>Mezcla de pilares</SectionTitle>
-          <div className="space-y-5">
-            {acc.pillars.map((p) => {
-              const P = PILLARS[p.key];
-              const diff = p.share - P.target;
-              return (
-                <div key={p.key}>
-                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <span className="flex items-center gap-2 font-semibold"><P.icon className={cx("h-4 w-4", P.text)} />{P.label}</span>
-                    <span className="font-mono text-xs tabular-nums text-muted">
-                      {p.count} posts · {pct(p.share, 0)} <span className={Math.abs(diff) > 10 ? "text-warn" : ""}>(meta {P.target}%)</span>
-                    </span>
-                  </div>
-                  <div className="relative h-2.5 rounded-full bg-surface2">
-                    <div className={cx("h-full rounded-full", P.color)} style={{ width: `${p.share}%` }} />
-                    <span className="absolute -top-1 h-[18px] w-0.5 rounded bg-fg" style={{ left: `${P.target}%` }} title={`Meta ${P.target}%`} />
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted">
-                    <span>Autoridad {p.count ? pct(p.authority) : "—"}</span>
-                    <span>Intención {p.count ? `${dec(p.intent)} ‰` : "—"}</span>
-                    <span>Conexión {p.count ? `${dec(p.connection)} ‰` : "—"}</span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted">{P.role}</p>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card className="p-5 lg:col-span-2">
-          <SectionTitle icon={Filter}>Embudo de captación</SectionTitle>
-          <ol className="space-y-2.5">
-            {acc.funnel.map((f, i) => {
-              const prev = i ? acc.funnel[i - 1].value : null;
-              return (
-                <li key={f.label}>
-                  <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
-                    <span className="flex items-center gap-2"><f.icon className="h-4 w-4 text-muted" />{f.label}</span>
-                    <span className="font-mono tabular-nums">{full(f.value)}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-surface2">
-                    <div className={cx("h-full rounded-full", i === acc.funnel.length - 1 ? "brand-grad" : "bg-fg/35")} style={{ width: `${Math.max(1.5, Math.sqrt(f.value / funnelMax) * 100)}%` }} />
-                  </div>
-                  {prev ? <div className="mt-0.5 text-right font-mono text-[10px] text-muted">{pct((f.value / prev) * 100, 1)} del paso anterior</div> : null}
-                </li>
-              );
-            })}
-          </ol>
-          <p className="mt-3 text-xs leading-relaxed text-muted">Barras en escala de raíz cuadrada para que se vean las etapas finales. Las consultas son mensajes que preguntan por talleres o mentorías.</p>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="p-5">
-          <SectionTitle icon={CircleCheck}>Lo que atrae alumnos</SectionTitle>
-          <div className="-mx-2 space-y-1">{top.map((p) => <PostRow key={p.id} post={p} analysis={analyses[p.id]} onOpen={onOpen} />)}</div>
-        </Card>
-        <Card className="p-5">
-          <SectionTitle icon={CircleX}>Lo que no convierte</SectionTitle>
-          <div className="-mx-2 space-y-1">{bottom.map((p) => <PostRow key={p.id} post={p} analysis={analyses[p.id]} onOpen={onOpen} />)}</div>
-        </Card>
-      </div>
-
-      <Card className="p-5">
-        <SectionTitle icon={TriangleAlert} aside={<span className="text-xs text-muted">en {posts.length} publicaciones</span>}>Errores que más se repiten</SectionTitle>
-        <ul className="divide-y divide-line">
-          {acc.recurring.map((i) => (
-            <li key={i.id} className="grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 py-3 sm:grid-cols-[auto_1fr_200px] sm:items-center">
-              <span className={cx("grid h-8 w-8 place-items-center rounded-full", SEV_STYLE[i.sev])}><i.icon className="h-4 w-4" /></span>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold">{i.title}</div>
-                <div className="text-xs text-muted">{i.fix.title}</div>
-              </div>
-              <div className="col-start-2 flex items-center gap-3 sm:col-start-3">
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface2">
-                  <div className="h-full rounded-full bg-fg/45" style={{ width: `${(i.count / posts.length) * 100}%` }} />
-                </div>
-                <span className="w-14 text-right font-mono text-xs tabular-nums text-muted">{i.count} de {posts.length}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </div>
-  );
-}
-
 function PostCard({ post, analysis, onOpen }) {
   return (
     <button onClick={() => onOpen(post.id)}
@@ -1806,7 +1456,7 @@ function PostCard({ post, analysis, onOpen }) {
   );
 }
 
-function ContentView({ posts, analyses, onOpen, onUpload }) {
+function ContentView({ posts, analyses, onOpen }) {
   const [query, setQuery] = useState("");
   const [pillar, setPillar] = useState("all");
   const [format, setFormat] = useState("all");
@@ -1839,13 +1489,13 @@ function ContentView({ posts, analyses, onOpen, onUpload }) {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.16em] text-muted">Catálogo por pilares</p>
-          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl">Tus publicaciones</h1>
-          <p className="mt-1 text-sm text-muted">Tocá cualquier publicación para ver si construye autoridad y atrae alumnos.</p>
+          <p className="font-mono text-xs uppercase tracking-[0.16em] text-muted">Casos de ejemplo</p>
+          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl">Aprender a leer el análisis</h1>
+          <p className="mt-2 max-w-2xl rounded-xl border border-dashed border-line bg-surface p-3 text-sm leading-relaxed text-muted">
+            <span className="font-semibold text-fg">Son publicaciones ficticias</span> de una cuenta imaginaria del nicho de escritura y formación, con métricas inventadas.
+            No son tuyas ni salen de ningún perfil real: sirven para ver cómo se ve un post que funciona y uno que no, y qué mira cada criterio.
+          </p>
         </div>
-        <button onClick={onUpload} className="brand-grad inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:brightness-110">
-          <Upload className="h-4 w-4" /> Subir post/video
-        </button>
       </header>
 
       <div className="flex flex-col gap-3">
@@ -2011,7 +1661,7 @@ function AnalysisPanel({ post, analysis, onClose }) {
             <Cover post={post} showMeta={false} className="aspect-[4/5] w-12 shrink-0 rounded-lg" />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                <TypeIcon className="h-3.5 w-3.5" /> {TYPE_META[post.type].label} · {PILLARS[post.pillar].label} · {dateFmt(post.date)}
+                <TypeIcon className="h-3.5 w-3.5" /> {TYPE_META[post.type].label} · {PILLARS[post.pillar].label} · <span className="font-semibold text-accent">Caso de ejemplo ficticio</span>
               </div>
               <h2 id="analysis-title" className="truncate font-display text-lg font-bold">{post.title}</h2>
             </div>
@@ -2227,7 +1877,7 @@ function UploadZone({ onFiles, onPick, onPaste }) {
     >
       <span className="brand-grad grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white"><Upload className="h-5 w-5" /></span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">{over ? "Soltalo para analizarlo" : "Revisá un post antes de publicarlo"}</p>
+        <p className="text-sm font-semibold">{over ? "Soltalo para analizarlo" : "Subí tu borrador"}</p>
         <p className="text-xs leading-relaxed text-muted">Arrastrá acá un video, una imagen, todas las diapositivas de un carrusel, los subtítulos (.srt) o un .txt con el texto. Analizo texto, audio y formato con los mismos criterios y te muestro qué corregir.</p>
       </div>
       <div className="flex shrink-0 gap-2">
@@ -2290,7 +1940,7 @@ function SlideStrip({ slides, onMove, onRemove, onAdd }) {
 }
 
 /** Revisión antes de publicar: carga el archivo, mide lo que puede y muestra el plan de acción. */
-function DraftPanel({ draft, onClose }) {
+function DraftPanel({ draft, onClose, onSave }) {
   const [text, setText] = useState(draft.text || "");
   const [pillar, setPillar] = useState("auto");
   const [media, setMedia] = useState(null);
@@ -2298,6 +1948,7 @@ function DraftPanel({ draft, onClose }) {
   const [cues, setCues] = useState(draft.cues || null);
   const [visual, setVisual] = useState(null);
   const [slides, setSlides] = useState(draft.slides || null);
+  const [savedAt, setSavedAt] = useState(null);
   const subsRef = useRef(null);
   const slideUrls = useRef([]);
 
@@ -2379,6 +2030,22 @@ function DraftPanel({ draft, onClose }) {
   const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues, visual, slides }), [draft.kind, text, pillar, media, audioReady, cues, visual, slides]);
   const Kind = DRAFT_KIND[draft.kind];
   const hasText = analysis.words > 0;
+  const save = () => {
+    onSave({
+      id: Date.now().toString(36),
+      date: new Date().toISOString(),
+      name: draft.name,
+      kind: draft.kind,
+      pillar: analysis.pillar,
+      score: analysis.score,
+      capScore: analysis.capScore,
+      growScore: analysis.growScore,
+      status: analysis.status,
+      issues: analysis.issues.map((i) => ({ id: i.id, title: i.title, sev: i.sev, goal: i.goal })),
+      excerpt: text.trim().slice(0, 140),
+    });
+    setSavedAt(text);
+  };
   const capOk = analysis.capScore >= 72, growOk = analysis.growScore >= 72;
   const verdict = analysis.status === "good" && capOk && growOk
     ? "Listo para publicar: le habla a tus futuros alumnos y tiene con qué circular."
@@ -2425,6 +2092,12 @@ function DraftPanel({ draft, onClose }) {
                           ? "Pegá el texto del post para analizarlo."
                           : "Pegá el texto del post o el guion del video para analizarlo."}
                 </p>
+                {hasText && (
+                  <button onClick={save} disabled={savedAt === text} className="mt-3 inline-flex items-center gap-2 rounded-full border border-line px-3.5 py-1.5 text-xs font-semibold transition hover:bg-surface2 disabled:opacity-60">
+                    {savedAt === text ? <Check className="h-3.5 w-3.5 text-good" /> : <ClipboardCheck className="h-3.5 w-3.5" />}
+                    {savedAt === text ? "Guardada en mis revisiones" : savedAt ? "Guardar esta versión" : "Guardar en mis revisiones"}
+                  </button>
+                )}
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
                 <span className="rounded-full bg-surface2 px-2.5 py-1">{analysis.words} palabras</span>
@@ -2531,6 +2204,270 @@ function DraftPanel({ draft, onClose }) {
 }
 
 /* ============================================================
+ * 6b. Revisar (inicio) y Criterios
+ * ============================================================ */
+const HISTORY_KEY = "reelscope.revisiones.v1";
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+function saveHistory(list) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  } catch (e) {
+    /* almacenamiento no disponible: la revisión no queda guardada */
+  }
+}
+
+/** Inicio: subir el borrador y ver las revisiones propias guardadas. */
+function ReviewView({ history, onFiles, onPick, onPaste, onDelete, goCriteria }) {
+  const patterns = useMemo(() => {
+    if (history.length < 3) return null;
+    const counts = {};
+    history.forEach((h) => h.issues.forEach((i) => {
+      counts[i.id] = counts[i.id] || { ...i, count: 0 };
+      counts[i.id].count++;
+    }));
+    const top = Object.values(counts).sort((a, b) => b.count - a.count || SEV_ORDER[a.sev] - SEV_ORDER[b.sev]).slice(0, 4);
+    const mix = PILLAR_KEYS.map((k) => ({ key: k, share: (history.filter((h) => h.pillar === k).length / history.length) * 100 }));
+    const avg = (f) => Math.round(history.reduce((a, h) => a + f(h), 0) / history.length);
+    return { top, mix, cap: avg((h) => h.capScore), grow: avg((h) => h.growScore) };
+  }, [history]);
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-muted">Antes de publicar</p>
+        <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl">Revisá tu post</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+          Subí el video, las imágenes del carrusel o el texto. La devolución usa criterios de buenas prácticas para cuentas de escritura y formación en Instagram,
+          con dos objetivos: atraer alumnos para tus talleres y mentorías (60%) y crecer (40%).{" "}
+          <button onClick={goCriteria} className="font-semibold text-accent underline-offset-2 hover:underline">Ver los criterios</button>
+        </p>
+      </header>
+
+      <UploadZone onFiles={onFiles} onPick={onPick} onPaste={onPaste} />
+
+      <Card className="p-5">
+        <SectionTitle icon={ClipboardCheck} aside={<span className="text-xs text-muted">Se guardan solo en este navegador</span>}>Mis revisiones</SectionTitle>
+        {history.length ? (
+          <ul className="divide-y divide-line">
+            {history.map((h) => {
+              const Kind = DRAFT_KIND[h.kind] || DRAFT_KIND.text;
+              const top = h.issues[0];
+              return (
+                <li key={h.id} className="flex items-start gap-3 py-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface2"><Kind.icon className="h-4 w-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-semibold">{h.name}</span>
+                      <PillarTag pillar={h.pillar} />
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] text-muted">
+                      {new Date(h.date).toLocaleDateString("es-AR", { day: "numeric", month: "short" })} · captación {h.capScore} · crecimiento {h.growScore}
+                    </div>
+                    {h.excerpt && <p className="mt-1 line-clamp-1 text-xs text-muted">“{h.excerpt}”</p>}
+                    {top && <p className="mt-1 text-xs"><span className="text-muted">Lo primero a corregir: </span>{top.title}</p>}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <StatusPill status={h.status} />
+                    <button onClick={() => onDelete(h.id)} className="grid h-7 w-7 place-items-center rounded-full text-muted hover:bg-surface2 hover:text-bad" aria-label={`Borrar la revisión ${h.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm leading-relaxed text-muted">
+            Todavía no guardaste revisiones. Cuando analices un post, tocá “Guardar en mis revisiones” y va a aparecer acá.
+            Con tres o más, la app te muestra qué errores se te repiten y cómo repartís tus pilares.
+          </p>
+        )}
+      </Card>
+
+      {patterns && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="p-5">
+            <SectionTitle icon={TriangleAlert} aside={<span className="text-xs text-muted">en {history.length} revisiones</span>}>Lo que más se te repite</SectionTitle>
+            <ul className="space-y-3">
+              {patterns.top.map((i) => (
+                <li key={i.id} className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">{i.title} {i.goal && <GoalTag goal={i.goal} />}</div>
+                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-surface2">
+                      <div className="h-full rounded-full bg-fg/45" style={{ width: `${(i.count / history.length) * 100}%` }} />
+                    </div>
+                  </div>
+                  <span className="w-14 shrink-0 text-right font-mono text-xs tabular-nums text-muted">{i.count} de {history.length}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 font-mono text-xs text-muted">Promedio: captación {patterns.cap} · crecimiento {patterns.grow}</p>
+          </Card>
+          <Card className="p-5">
+            <SectionTitle icon={LayoutGrid} aside={<span className="text-xs text-muted">tus revisiones vs. recomendado</span>}>Cómo repartís tus pilares</SectionTitle>
+            <div className="space-y-4">
+              {patterns.mix.map((m) => {
+                const P = PILLARS[m.key];
+                return (
+                  <div key={m.key}>
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="flex items-center gap-2 font-semibold"><P.icon className={cx("h-4 w-4", P.text)} />{P.label}</span>
+                      <span className="font-mono text-xs tabular-nums text-muted">{pct(m.share, 0)} <span className={Math.abs(m.share - P.target) > 10 ? "text-warn" : ""}>(meta {P.target}%)</span></span>
+                    </div>
+                    <div className="relative h-2.5 rounded-full bg-surface2">
+                      <div className={cx("h-full rounded-full", P.color)} style={{ width: `${m.share}%` }} />
+                      <span className="absolute -top-1 h-[18px] w-0.5 rounded bg-fg" style={{ left: `${P.target}%` }} title={`Meta ${P.target}%`} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CHECKLIST = {
+  captacion: [
+    { icon: Briefcase, title: "Puente comercial", text: "En los posts de Autoridad y Proceso, una frase que recuerde que enseñás esto y una sola acción: seguirte, escribirte una palabra clave o anotarse en la lista de espera." },
+    { icon: Languages, title: "Lenguaje accesible", text: "Hablarle a un escritor aficionado, no a colegas. Un concepto por pieza, explicado con un ejemplo antes de nombrarlo." },
+    { icon: Feather, title: "Vulnerabilidad", text: "Que aparezca tu novela, tu proceso o un error propio. La gente contrata mentorías a personas, no a enciclopedias." },
+    { icon: MessagesSquare, title: "Conversación", text: "Cerrar con una pregunta abierta que pida una experiencia concreta. Esos comentarios te dicen qué necesita tu futuro alumno." },
+  ],
+  crecimiento: [
+    { icon: Zap, title: "Gancho", text: "Primera frase (o primeros 3 segundos) de menos de 20 palabras, sin saludos, con curiosidad: una pregunta, un número, un error o una promesa." },
+    { icon: Move, title: "Atractivo visual", text: "En video, un cambio de plano cada 1,5 a 2,5 segundos y movimiento desde el primer segundo. En imagen, texto con contraste alto." },
+    { icon: Repeat2, title: "Compartible", text: "Una lista con número o un pedido concreto de mandárselo a alguien. Los envíos por mensaje son lo que más lo lleva a gente nueva." },
+    { icon: UserPlus, title: "Razón para seguirte", text: "Una serie (“parte 1 de 3”) o el anuncio de la próxima entrega con día." },
+    { icon: Search, title: "Descubrimiento", text: "Palabras que un escritor buscaría (escribir, novela, personaje, bloqueo) en la primera línea y en el texto en pantalla." },
+  ],
+};
+const FORMAT_SPECS = [
+  { icon: Clapperboard, title: "Reel", items: ["Vertical 9:16 (1080 × 1920).", "Sonido desde el primer segundo, sin pausas de más de 1,2 s.", "Menos de 60 s; el llamado a la acción antes del final.", "Subtítulos en pantalla: mucha gente mira sin sonido."] },
+  { icon: GalleryHorizontalEnd, title: "Carrusel", items: ["Todas las diapositivas en 4:5 (1080 × 1350).", "Entre 5 y 10 diapositivas.", "Portada con promesa y contraste alto: decide si deslizan.", "Resumen guardable al final y el llamado a la acción en la última."] },
+  { icon: ImageIcon, title: "Foto o texto", items: ["Vertical 4:5.", "Texto legible en la grilla del perfil.", "El texto del post hace el trabajo: gancho en la primera línea y pregunta al final."] },
+];
+
+/** Criterios con los que se evalúa: objetivos, pilares, lista de control y referencias. */
+function CriteriaView() {
+  return (
+    <div className="space-y-8">
+      <header>
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-muted">Cómo se evalúa</p>
+        <h1 className="mt-1 font-display text-3xl font-bold tracking-tight sm:text-4xl">Criterios del nicho</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+          Para cuentas de escritura, literatura y formación que quieren vender talleres y mentorías. Son buenas prácticas de Instagram aplicadas a ese objetivo:
+          no son reglas oficiales de Instagram, que no publica valores de referencia. Tomalos como guía y ajustalos cuando tengas tus propios números.
+        </p>
+      </header>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {["captacion", "crecimiento"].map((g) => (
+          <Card key={g} className="p-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-lg font-bold">{GOALS[g].label}</h2>
+              <span className="font-mono text-sm tabular-nums text-muted">peso {Math.round(GOAL_WEIGHT[g] * 100)}%</span>
+            </div>
+            <p className="mt-1 text-sm text-muted">{GOALS[g].sub}</p>
+            <p className="mt-3 text-sm leading-relaxed">
+              {g === "captacion"
+                ? "Que te vean como alguien de quien aprender y que te pregunten por tus talleres. Es el objetivo principal: por eso pesa más."
+                : "Que te descubra gente nueva, te siga, te comparta y te comente. Sin alcance no hay a quién venderle, pero tiene que ser la audiencia correcta."}
+            </p>
+          </Card>
+        ))}
+      </section>
+
+      <section>
+        <SectionTitle icon={LayoutGrid}>Pilares de contenido y mezcla recomendada</SectionTitle>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {PILLAR_KEYS.map((k) => {
+            const P = PILLARS[k];
+            return (
+              <Card key={k} className="p-5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cx("grid h-9 w-9 place-items-center rounded-full", P.soft)}><P.icon className={cx("h-4 w-4", P.text)} /></span>
+                  <span className="font-mono text-2xl font-semibold tabular-nums">{P.target}%</span>
+                </div>
+                <h3 className="mt-3 font-semibold">{P.label}</h3>
+                <p className="mt-1 text-sm text-muted">{P.desc}</p>
+                <p className="mt-2 text-sm">{P.role}</p>
+              </Card>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <SectionTitle icon={ClipboardCheck}>Lista de control antes de publicar</SectionTitle>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {["captacion", "crecimiento"].map((g) => (
+            <Card key={g} className="p-5">
+              <div className="mb-3 flex items-center gap-2"><GoalTag goal={g} /></div>
+              <ul className="space-y-3">
+                {CHECKLIST[g].map((c) => (
+                  <li key={c.title} className="flex gap-3">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-surface2"><c.icon className="h-4 w-4" /></span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">{c.title}</div>
+                      <p className="text-sm leading-relaxed text-muted">{c.text}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <SectionTitle icon={FileImage}>Por formato</SectionTitle>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {FORMAT_SPECS.map((f) => (
+            <Card key={f.title} className="p-5">
+              <h3 className="flex items-center gap-2 font-semibold"><f.icon className="h-4 w-4 text-accent" />{f.title}</h3>
+              <ul className="mt-3 space-y-1.5">
+                {f.items.map((x) => <li key={x} className="flex gap-2 text-sm leading-relaxed"><ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-accent" />{x}</li>)}
+              </ul>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <SectionTitle icon={TrendingUp}>Después de publicar: valores de referencia</SectionTitle>
+        <p className="mb-3 max-w-2xl text-sm text-muted">Para leer las estadísticas de tus posts cuando ya estén publicados. Son referencias razonables para cuentas chicas de formación, no valores oficiales.</p>
+        <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead className="border-b border-line text-xs text-muted">
+              <tr><th className="px-4 py-3 font-semibold">Indicador</th><th className="px-4 py-3 font-semibold">Cómo se calcula</th><th className="px-4 py-3 font-semibold">Objetivo</th><th className="px-4 py-3 text-right font-semibold">Débil</th><th className="px-4 py-3 text-right font-semibold">Sólido</th></tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {Object.entries(KPI).map(([k, m]) => (
+                <tr key={k}>
+                  <td className="px-4 py-3 font-semibold">{m.label}</td>
+                  <td className="px-4 py-3 text-muted">{m.sub}</td>
+                  <td className="px-4 py-3"><GoalTag goal={["authority", "intent", "connection"].includes(k) ? "captacion" : "crecimiento"} /></td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-bad">&lt; {dec(m.red)} {m.unit}</td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-good">≥ {dec(m.green)} {m.unit}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/* ============================================================
  * 7. App
  * ============================================================ */
 function useTheme() {
@@ -2554,8 +2491,9 @@ function useTheme() {
 }
 
 const NAV = [
-  { key: "dashboard", label: "Resumen", icon: LayoutDashboard },
-  { key: "content", label: "Contenido", icon: LayoutGrid },
+  { key: "review", label: "Revisar", icon: ClipboardCheck },
+  { key: "criteria", label: "Criterios", icon: BookOpen },
+  { key: "examples", label: "Ejemplos", icon: LayoutGrid },
 ];
 
 function Brand({ compact }) {
@@ -2572,7 +2510,8 @@ function Brand({ compact }) {
 export default function App() {
   const posts = SEED_POSTS;
   const analyses = useMemo(() => Object.fromEntries(posts.map((p) => [p.id, analyzePost(p)])), [posts]);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("review");
+  const [history, setHistory] = useState(loadHistory);
   const [selectedId, setSelectedId] = useState(null);
   const [toast, setToast] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -2628,6 +2567,16 @@ export default function App() {
     else if (type.startsWith("text/") || /\.(txt|md)$/i.test(file.name)) setDraft({ kind: "text", name: file.name, text: await file.text() });
     else setToast("Ese formato no se puede analizar. Subí un video, una imagen, subtítulos (.srt) o un archivo .txt.");
   };
+  const addReview = (rec) => setHistory((list) => {
+    const next = [rec, ...list].slice(0, 100);
+    saveHistory(next);
+    return next;
+  });
+  const deleteReview = (id) => setHistory((list) => {
+    const next = list.filter((h) => h.id !== id);
+    saveHistory(next);
+    return next;
+  });
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3200);
@@ -2663,15 +2612,7 @@ export default function App() {
             {theme === "dark" ? <SunMedium className="h-6 w-6 shrink-0" strokeWidth={1.8} /> : <MoonStar className="h-6 w-6 shrink-0" strokeWidth={1.8} />}
             <span className="max-xl:hidden">{theme === "dark" ? "Modo claro" : "Modo oscuro"}</span>
           </button>
-          <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-            <span className="brand-grad grid h-9 w-9 shrink-0 place-items-center rounded-full p-[2px]">
-              <span className="grid h-full w-full place-items-center rounded-full bg-bg"><BookOpen className="h-4 w-4" /></span>
-            </span>
-            <div className="min-w-0 max-xl:hidden">
-              <div className="truncate text-sm font-semibold">{ACCOUNT.handle}</div>
-              <div className="truncate text-xs text-muted">{ACCOUNT.name}</div>
-            </div>
-          </div>
+          <p className="px-3 pb-1 text-[11px] leading-snug text-muted max-xl:hidden">Revisión previa para cuentas de escritura y formación.</p>
         </div>
       </aside>
 
@@ -2684,11 +2625,15 @@ export default function App() {
 
       <main className="gutter pb-28 pt-6 md:ml-[76px] md:pb-12 md:pt-10 xl:ml-[260px]">
         <div className="mx-auto max-w-6xl">
-          <UploadZone onFiles={handleFiles} onPick={() => fileRef.current?.click()} onPaste={() => setDraft({ kind: "text", name: "Texto pegado", text: "" })} />
-          {view === "dashboard"
-            ? <DashboardView posts={posts} analyses={analyses} onOpen={setSelectedId} goContent={() => setView("content")} />
-            : <ContentView posts={posts} analyses={analyses} onOpen={setSelectedId} onUpload={() => fileRef.current?.click()} />}
-          <p className="mt-10 text-center text-xs text-muted">Simulador con datos de ejemplo. No está afiliado a Instagram ni a Meta.</p>
+          {view === "review" && (
+            <ReviewView
+              history={history} onDelete={deleteReview} goCriteria={() => setView("criteria")}
+              onFiles={handleFiles} onPick={() => fileRef.current?.click()} onPaste={() => setDraft({ kind: "text", name: "Texto pegado", text: "" })}
+            />
+          )}
+          {view === "criteria" && <CriteriaView />}
+          {view === "examples" && <ContentView posts={posts} analyses={analyses} onOpen={setSelectedId} />}
+          <p className="mt-10 text-center text-xs text-muted">Los casos de ejemplo son ficticios. No está afiliado a Instagram ni a Meta.</p>
         </div>
       </main>
 
@@ -2704,7 +2649,7 @@ export default function App() {
       </nav>
 
       {selected && <AnalysisPanel post={selected} analysis={analyses[selected.id]} onClose={() => setSelectedId(null)} />}
-      {draft && <DraftPanel key={draft.url || draft.slides?.[0]?.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} />}
+      {draft && <DraftPanel key={draft.url || draft.slides?.[0]?.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} onSave={(rec) => { addReview(rec); setToast("Revisión guardada en “Mis revisiones”."); }} />}
       <input
         ref={fileRef} id="draft-file" type="file" multiple accept="image/*,video/*,.mov,.txt,.md,.srt,.vtt,text/plain" className="hidden"
         onChange={(e) => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }}

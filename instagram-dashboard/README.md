@@ -1,6 +1,10 @@
-# Reelscope Autoridad · Simulador de captación para talleres de escritura
+# Reelscope Autoridad · Revisión previa de posts para cuentas de escritura y formación
 
-SPA en React + Tailwind CSS + lucide-react que analiza el contenido de una socióloga, investigadora y escritora para medir si construye **autoridad** y atrae **futuros alumnos** de talleres y mentorías editoriales.
+SPA en React + Tailwind CSS + lucide-react. Subís un video, un carrusel, una imagen o un texto **antes de publicarlo** y recibís una devolución según criterios de buenas prácticas del nicho (escritura, literatura y formación), con dos objetivos: atraer alumnos para talleres y mentorías (60%) y crecer (40%).
+
+- **Revisar** (inicio): subir el borrador, ver el análisis y guardarlo en *Mis revisiones* (solo en el navegador). Con 3 o más revisiones muestra los errores que se repiten y el reparto de pilares.
+- **Criterios**: objetivos, pilares y mezcla recomendada, lista de control, especificaciones por formato y valores de referencia para después de publicar (no oficiales).
+- **Ejemplos**: 5 casos ficticios, con métricas inventadas, para aprender a leer el análisis. No corresponden a ningún perfil real.
 
 - `InstagramDashboardSimulator.jsx`: la app completa en un solo componente (`export default App`).
 - `tailwind.config.js` + `index.css`: tokens de color (modo claro/oscuro) que usa el componente.
