@@ -26,7 +26,7 @@ import {
   Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb,
   Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
-  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft,
 } from "lucide-react";
 
 /* ============================================================
@@ -235,6 +235,7 @@ const GOAL_OF = {
   hook: "crecimiento", captive: "crecimiento", cover: "crecimiento", shares: "crecimiento", follows: "crecimiento",
   noaudio: "crecimiento", silence: "crecimiento", pauses: "crecimiento", volume: "crecimiento", clipping: "crecimiento",
   fast: "crecimiento", length: "crecimiento", ratio: "crecimiento", pace: "crecimiento", static: "crecimiento", dark: "crecimiento",
+  mixedratio: "crecimiento", lowslides: "crecimiento", longcarousel: "crecimiento", shortcarousel: "crecimiento",
 };
 const GOAL_ORDER = { captacion: 0, ambos: 0, crecimiento: 1 };
 /** Ordena por gravedad y, a igual gravedad, primero lo que afecta a la captación (objetivo principal). */
@@ -665,23 +666,24 @@ const QUESTION_ALT = {
   comunidad: "¿Estás de acuerdo o lo ves distinto? Contame tu experiencia en comentarios.",
 };
 
-/** Desvío estándar de la luminancia (0–255): mide si la imagen tiene contraste suficiente. */
+/**
+ * Contraste de la imagen (0–255): distancia entre los tonos más claros y los más oscuros
+ * (percentiles 99,7 y 0,3 de la luminancia). Un texto oscuro sobre fondo claro da un valor
+ * alto aunque ocupe poco espacio; un texto apenas más claro que el fondo da un valor bajo.
+ */
+const CONTRAST_LOW = 45;
+const CONTRAST_GOOD = 80;
 function lumaContrast(source, w, h) {
   const c = document.createElement("canvas");
-  c.width = 48;
-  c.height = Math.max(1, Math.round((48 * h) / w));
+  c.width = 120;
+  c.height = Math.max(1, Math.round((120 * h) / w));
   const ctx = c.getContext("2d");
   ctx.drawImage(source, 0, 0, c.width, c.height);
   const d = ctx.getImageData(0, 0, c.width, c.height).data;
-  let s1 = 0, s2 = 0, n = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const y = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-    s1 += y;
-    s2 += y * y;
-    n++;
-  }
-  const mean = s1 / n;
-  return Math.sqrt(Math.max(0, s2 / n - mean * mean));
+  const ys = new Float32Array(d.length / 4);
+  for (let i = 0, k = 0; i < d.length; i += 4, k++) ys[k] = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  ys.sort();
+  return ys[Math.floor(ys.length * 0.997)] - ys[Math.floor(ys.length * 0.003)];
 }
 
 /** Lee subtítulos .srt o .vtt (los que exportan CapCut o Edits) como [{start, end, text}]. */
@@ -823,7 +825,7 @@ const FOLLOW_WORDS = ["seguime", "sigueme", "parte 1", "parte 2", "primera parte
 const CURIOSITY = /\?|\d|nadie|error|secreto|por que|lo que|mito|nunca|deja de|dejá de|no es|verdad|cuidado|asi es como|el truco/;
 const NUMBERED = /(^|\s)(\d+|dos|tres|cuatro|cinco|seis|siete|diez)\s+(errores|claves|pasos|preguntas|libros|ejercicios|trucos|senales|razones|cosas|formas|autores|bloqueos)/;
 
-function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues, visual }) {
+function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues, visual, slides }) {
   const text = rawText.trim();
   const nt = norm(text);
   const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
@@ -879,8 +881,12 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
     visualSignal = { key: "visual", label: "Ritmo visual", value: visual ? `${dec(visual.avgShot)} s` : "…", detail: "por plano, en promedio", status: st, icon: Move };
   } else if (kind === "image") {
     const ctr = media?.contrast;
-    const st = ctr == null ? "warn" : ctr >= 55 ? "good" : ctr >= 40 ? "warn" : "bad";
+    const st = ctr == null ? "warn" : ctr >= CONTRAST_GOOD ? "good" : ctr >= CONTRAST_LOW ? "warn" : "bad";
     visualSignal = { key: "visual", label: "Impacto visual", value: ctr == null ? "…" : `${Math.round(ctr)}/255`, detail: "contraste de la imagen", status: st, icon: Sun };
+  } else if (kind === "carousel") {
+    const ctr = slides?.[0]?.contrast;
+    const st = ctr == null ? "warn" : ctr >= CONTRAST_GOOD ? "good" : ctr >= CONTRAST_LOW ? "warn" : "bad";
+    visualSignal = { key: "visual", label: "Impacto de la portada", value: ctr == null ? "…" : `${Math.round(ctr)}/255`, detail: "contraste de la diapositiva 1", status: st, icon: Sun };
   } else {
     visualSignal = { key: "visual", label: "Impacto visual", value: "Sin imagen", detail: "subí la portada o el video", status: "warn", icon: Sun };
   }
@@ -1037,11 +1043,63 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
         fix: { title: "Usá formato vertical 4:5 (1080 × 1350)", steps: ["Reencuadrá la imagen y dejá el texto en el centro."] },
       });
     }
-    if (media.contrast != null && media.contrast < 40) {
+    if (media.contrast != null && media.contrast < CONTRAST_LOW) {
       issues.push({
         id: "cover", sev: kind === "image" ? "media" : "baja", icon: ImageIcon, title: "Portada poco legible",
         why: `${kind === "video" ? "El primer fotograma" : "La imagen"} tiene poco contraste (${Math.round(media.contrast)}/255): en la grilla no se va a leer.`,
         fix: { title: "Portada con contraste y una promesa concreta", steps: ["Máximo 6 palabras.", "Texto claro sobre fondo oscuro o al revés.", "Prometé un resultado para el escritor, no un tema académico."] },
+      });
+    }
+  }
+  // --- Carrusel: cantidad, proporciones y legibilidad de cada diapositiva
+  if (kind === "carousel" && slides?.length) {
+    facts.push(`${slides.length} diapositivas`);
+    const measured = slides.filter((x) => x.width);
+    if (measured.length) {
+      const first = slides[0];
+      if (first.width) facts.push(`${first.width}×${first.height} px`);
+      const ratios = new Set(measured.map((x) => (x.height / x.width).toFixed(2)));
+      if (ratios.size > 1) {
+        issues.push({
+          id: "mixedratio", sev: "media", icon: GalleryHorizontalEnd, title: "Diapositivas con proporciones distintas",
+          why: "Instagram recorta todas las diapositivas a la proporción de la primera: las que no coinciden se van a ver cortadas o con bandas.",
+          fix: { title: "Exportá todas en el mismo tamaño", steps: ["Usá 1080 × 1350 px (4:5) para todas las diapositivas.", "En Canva, armá el carrusel en un solo diseño con varias páginas: así salen todas iguales."] },
+        });
+      }
+      if (first.width && first.height / first.width < 1) {
+        issues.push({
+          id: "ratio", sev: "baja", icon: FileImage, title: "Carrusel horizontal",
+          why: "En el feed ocupa menos pantalla y en la grilla del perfil se recorta.",
+          fix: { title: "Usá formato vertical 4:5 (1080 × 1350)", steps: ["Reencuadrá las diapositivas y dejá el texto en el centro."] },
+        });
+      }
+      if (first.contrast != null && first.contrast < CONTRAST_LOW) {
+        issues.push({
+          id: "cover", sev: "media", icon: ImageIcon, title: "Portada poco legible",
+          why: `La diapositiva 1 tiene poco contraste (${Math.round(first.contrast)}/255): en el feed y en la grilla no se va a leer, y es la que decide si alguien desliza.`,
+          fix: { title: "Portada con contraste y una promesa concreta", steps: ["Máximo 6 palabras, en tipografía gruesa.", "Texto claro sobre fondo oscuro o al revés.", "Prometé un resultado para el escritor, no un tema académico."] },
+        });
+      }
+      const low = slides.map((x, i) => ({ n: i + 1, c: x.contrast })).slice(1).filter((x) => x.c != null && x.c < CONTRAST_LOW);
+      if (low.length) {
+        issues.push({
+          id: "lowslides", sev: "baja", icon: ImageIcon, title: "Diapositivas poco legibles",
+          why: `${low.length === 1 ? "La diapositiva" : "Las diapositivas"} ${low.map((x) => x.n).join(", ")} ${low.length === 1 ? "tiene" : "tienen"} poco contraste. Si el texto cuesta leerlo, la gente deja de deslizar ahí.`,
+          fix: { title: "Subí el contraste del texto", steps: ["Texto oscuro sobre fondo claro (o al revés), sin fotos detrás del texto.", "Si usás una foto de fondo, poné una capa de color semitransparente encima."] },
+        });
+      }
+    }
+    if (slides.length > 10) {
+      issues.push({
+        id: "longcarousel", sev: "media", icon: GalleryHorizontalEnd, title: "Carrusel largo",
+        why: `Tiene ${slides.length} diapositivas. Cada una de más pierde lectores, y tu llamado a la acción suele estar en la última.`,
+        fix: { title: "Recortá a 7–10 diapositivas", steps: ["Una idea por diapositiva.", "Lo que sobre, guardalo para una segunda parte (y anunciala: te da una razón para que te sigan)."] },
+      });
+    } else if (slides.length < 3) {
+      issues.push({
+        id: "shortcarousel", sev: "baja", icon: GalleryHorizontalEnd, title: "Pocas diapositivas",
+        why: "Con 2 diapositivas hay poco recorrido: menos tiempo de lectura y menos oportunidades de que Instagram vuelva a mostrarlo desde la segunda a quien no deslizó.",
+        fix: { title: "Llevalo a 5–8 diapositivas", steps: ["Portada con promesa, desarrollo en 3–5 pasos, resumen guardable y cierre con tu llamado a la acción."] },
       });
     }
   }
@@ -1186,6 +1244,9 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   if (openQuestion) strengths.push("Termina invitando a responder: vas a recibir comentarios de valor.");
   if (shareTrigger) strengths.push("Es compartible: tiene una lista o un pedido concreto de enviarlo.");
   if (followTrigger) strengths.push("Da una razón para seguirte: anuncia una serie o la próxima entrega.");
+  if (kind === "carousel" && slides?.length >= 5 && slides.length <= 10 && new Set(slides.filter((x) => x.width).map((x) => (x.height / x.width).toFixed(2))).size <= 1) {
+    strengths.push(`Buena extensión: ${slides.length} diapositivas con la misma proporción.`);
+  }
   if (kind === "video" && visual && visual.avgShot <= 2.5) strengths.push(`Ritmo visual ágil: un plano cada ${dec(visual.avgShot)} s.`);
 
   const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
@@ -2151,7 +2212,7 @@ function AudioCard({ audio }) {
 }
 
 /** Zona de arrastrar y soltar para revisar un post antes de publicarlo. */
-function UploadZone({ onFile, onPick, onPaste }) {
+function UploadZone({ onFiles, onPick, onPaste }) {
   const [over, setOver] = useState(false);
   return (
     <div
@@ -2160,15 +2221,14 @@ function UploadZone({ onFile, onPick, onPaste }) {
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) onFile(f);
+        if (e.dataTransfer.files?.length) onFiles(e.dataTransfer.files);
       }}
       className={cx("mb-6 flex flex-col gap-3 rounded-2xl border-2 border-dashed p-4 transition sm:flex-row sm:items-center", over ? "border-accent bg-accent/[0.06]" : "border-line bg-surface")}
     >
       <span className="brand-grad grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white"><Upload className="h-5 w-5" /></span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">{over ? "Soltalo para analizarlo" : "Revisá un post antes de publicarlo"}</p>
-        <p className="text-xs leading-relaxed text-muted">Arrastrá acá un video, una imagen, los subtítulos (.srt) o un .txt con el texto. Analizo texto, audio y formato con los mismos criterios y te muestro qué corregir.</p>
+        <p className="text-xs leading-relaxed text-muted">Arrastrá acá un video, una imagen, todas las diapositivas de un carrusel, los subtítulos (.srt) o un .txt con el texto. Analizo texto, audio y formato con los mismos criterios y te muestro qué corregir.</p>
       </div>
       <div className="flex shrink-0 gap-2">
         <button onClick={onPick} className="brand-grad inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110 sm:flex-none">
@@ -2186,7 +2246,48 @@ const DRAFT_KIND = {
   text: { label: "Texto", icon: FileText },
   image: { label: "Imagen", icon: FileImage },
   video: { label: "Video", icon: FileVideo },
+  carousel: { label: "Carrusel", icon: GalleryHorizontalEnd },
 };
+
+const naturalByName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+
+/** Tira de diapositivas del carrusel: vista previa, orden y legibilidad de cada una. */
+function SlideStrip({ slides, onMove, onRemove, onAdd }) {
+  const addRef = useRef(null);
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold text-muted">{slides.length} diapositivas · en el orden en que se van a publicar</span>
+        <span className="text-xs text-muted">Usá las flechas para reordenarlas</span>
+      </div>
+      <ol className="flex gap-3 overflow-x-auto pb-2">
+        {slides.map((sl, i) => (
+          <li key={sl.url} className="w-[132px] shrink-0">
+            <div className="relative overflow-hidden rounded-xl border border-line bg-surface2">
+              <img src={sl.url} alt={`Diapositiva ${i + 1}`} className="aspect-[4/5] w-full object-cover" />
+              <span className="absolute left-1.5 top-1.5 rounded-full bg-black/65 px-2 py-0.5 font-mono text-[11px] font-semibold text-white">{i + 1}</span>
+              {sl.contrast != null && sl.contrast < CONTRAST_LOW && (
+                <span className="absolute right-1.5 top-1.5 rounded-full bg-bad px-2 py-0.5 text-[10px] font-bold text-white">Poco contraste</span>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center justify-between gap-1">
+              <button onClick={() => onMove(i, -1)} disabled={i === 0} className="grid h-7 w-7 place-items-center rounded-full border border-line disabled:opacity-30" aria-label={`Mover la diapositiva ${i + 1} a la izquierda`}><ChevronLeft className="h-3.5 w-3.5" /></button>
+              <button onClick={() => onRemove(i)} disabled={slides.length <= 1} className="grid h-7 w-7 place-items-center rounded-full border border-line text-muted hover:text-bad disabled:opacity-30" aria-label={`Quitar la diapositiva ${i + 1}`}><X className="h-3.5 w-3.5" /></button>
+              <button onClick={() => onMove(i, 1)} disabled={i === slides.length - 1} className="grid h-7 w-7 place-items-center rounded-full border border-line disabled:opacity-30" aria-label={`Mover la diapositiva ${i + 1} a la derecha`}><ChevronRight className="h-3.5 w-3.5" /></button>
+            </div>
+          </li>
+        ))}
+        <li className="w-[132px] shrink-0">
+          <button onClick={() => addRef.current?.click()} className="grid aspect-[4/5] w-full place-items-center rounded-xl border-2 border-dashed border-line text-sm text-muted transition hover:border-accent hover:text-fg">
+            <span className="flex flex-col items-center gap-1"><Upload className="h-5 w-5" />Agregar</span>
+          </button>
+          <input ref={addRef} id="draft-slides" type="file" accept="image/*" multiple className="hidden"
+            onChange={(e) => { if (e.target.files?.length) onAdd([...e.target.files]); e.target.value = ""; }} />
+        </li>
+      </ol>
+    </div>
+  );
+}
 
 /** Revisión antes de publicar: carga el archivo, mide lo que puede y muestra el plan de acción. */
 function DraftPanel({ draft, onClose }) {
@@ -2196,7 +2297,33 @@ function DraftPanel({ draft, onClose }) {
   const [audio, setAudio] = useState(draft.kind === "video" ? "loading" : null);
   const [cues, setCues] = useState(draft.cues || null);
   const [visual, setVisual] = useState(null);
+  const [slides, setSlides] = useState(draft.slides || null);
   const subsRef = useRef(null);
+  const slideUrls = useRef([]);
+
+  // Carrusel: medir proporción y contraste de cada diapositiva que todavía no se midió
+  useEffect(() => {
+    if (!slides) return;
+    slideUrls.current = Array.from(new Set([...slideUrls.current, ...slides.map((x) => x.url)]));
+    slides.filter((x) => x.width == null && !x.measuring).forEach((sl) => {
+      sl.measuring = true;
+      const img = new Image();
+      img.onload = () => {
+        let contrast = null;
+        try { contrast = lumaContrast(img, img.naturalWidth, img.naturalHeight); } catch (e) { /* imagen no legible */ }
+        setSlides((list) => list && list.map((x) => (x.url === sl.url ? { ...x, width: img.naturalWidth, height: img.naturalHeight, contrast } : x)));
+      };
+      img.src = sl.url;
+    });
+  }, [slides]);
+  useEffect(() => () => slideUrls.current.forEach((u) => URL.revokeObjectURL(u)), []);
+  const moveSlide = (i, dir) => setSlides((list) => {
+    const next = [...list];
+    [next[i], next[i + dir]] = [next[i + dir], next[i]];
+    return next;
+  });
+  const removeSlide = (i) => setSlides((list) => list.filter((_, k) => k !== i));
+  const addSlides = (files) => setSlides((list) => [...list, ...files.filter((f) => (f.type || "").startsWith("image/")).sort(naturalByName).map((f) => ({ name: f.name, url: URL.createObjectURL(f) }))]);
   const panelRef = useRef(null);
 
   // Audio: se decodifica la pista del video en el navegador
@@ -2249,7 +2376,7 @@ function DraftPanel({ draft, onClose }) {
   }, [draft]);
 
   const audioReady = audio && audio !== "loading" && !audio.error ? audio : null;
-  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues, visual }), [draft.kind, text, pillar, media, audioReady, cues, visual]);
+  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues, visual, slides }), [draft.kind, text, pillar, media, audioReady, cues, visual, slides]);
   const Kind = DRAFT_KIND[draft.kind];
   const hasText = analysis.words > 0;
   const capOk = analysis.capScore >= 72, growOk = analysis.growScore >= 72;
@@ -2280,6 +2407,7 @@ function DraftPanel({ draft, onClose }) {
         </div>
 
         <div className="gutter space-y-8 pb-16 pt-6">
+          {draft.kind === "carousel" && slides && <SlideStrip slides={slides} onMove={moveSlide} onRemove={removeSlide} onAdd={addSlides} />}
           <div className={cx("grid grid-cols-1 gap-5", draft.url && "md:grid-cols-[220px_1fr]")}>
             {draft.kind === "image" && <img src={draft.url} alt="Vista previa del post" className="mx-auto max-h-[340px] w-full max-w-[260px] rounded-2xl object-cover md:max-w-none" />}
             {draft.kind === "video" && <video src={draft.url} controls muted playsInline className="mx-auto max-h-[380px] w-full max-w-[260px] rounded-2xl bg-black md:max-w-none" />}
@@ -2287,7 +2415,15 @@ function DraftPanel({ draft, onClose }) {
               <div>
                 <p className="font-mono text-xs uppercase tracking-[0.16em] text-accent">Diagnóstico de la consultora</p>
                 <p className="mt-2 font-serif text-xl italic leading-snug">
-                  {hasText ? verdict : draft.kind === "text" ? "Pegá o escribí el texto del post para analizarlo." : "Pegá el texto del post o el guion del video para analizarlo."}
+                  {hasText
+                    ? verdict
+                    : draft.kind === "text"
+                      ? "Pegá o escribí el texto del post para analizarlo."
+                      : draft.kind === "carousel"
+                        ? "Pegá el texto de la portada, de las diapositivas y del post para analizarlo."
+                        : draft.kind === "image"
+                          ? "Pegá el texto del post para analizarlo."
+                          : "Pegá el texto del post o el guion del video para analizarlo."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
@@ -2297,17 +2433,19 @@ function DraftPanel({ draft, onClose }) {
               </div>
               <div>
                 <label htmlFor="draft-text" className="mb-1.5 block text-xs font-semibold text-muted">
-                  {draft.kind === "text" ? "Texto del post" : "Texto del post o guion del video"}
+                  {draft.kind === "video" ? "Texto del post o guion del video" : draft.kind === "carousel" ? "Texto del post y de las diapositivas" : "Texto del post"}
                 </label>
                 <textarea
                   id="draft-text" value={text} onChange={(e) => setText(e.target.value)} rows={7}
-                  placeholder={draft.kind === "video" ? "Pegá acá lo que decís en el video y el texto que va a acompañar al Reel…" : "Pegá acá el texto que vas a publicar…"}
+                  placeholder={draft.kind === "video" ? "Pegá acá lo que decís en el video y el texto que va a acompañar al Reel…" : draft.kind === "carousel" ? "Empezá por el texto de la portada, seguí con el de cada diapositiva y después el texto del post…" : "Pegá acá el texto que vas a publicar…"}
                   className="w-full resize-y rounded-xl border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition placeholder:text-muted focus:border-accent"
                 />
                 <p className="mt-1.5 text-xs text-muted">
                   {draft.kind === "video"
                     ? "El audio se analiza solo (silencios, pausas, volumen). Para analizar lo que decís, cargá los subtítulos que exporta CapCut o Edits, o pegá el guion."
-                    : "El análisis se actualiza mientras escribís."}
+                    : draft.kind === "carousel"
+                      ? "De las imágenes se mide proporción y contraste; lo que dicen no se lee. Para analizar el gancho y el llamado a la acción, pegá el texto empezando por la portada."
+                      : "El análisis se actualiza mientras escribís."}
                 </p>
                 {draft.kind === "video" && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -2459,6 +2597,25 @@ export default function App() {
     if (draft?.url) URL.revokeObjectURL(draft.url);
     setDraft(null);
   };
+  const handleFiles = async (fileList) => {
+    const files = [...fileList];
+    const images = files.filter((f) => (f.type || "").startsWith("image/")).sort(naturalByName);
+    const textFile = files.find((f) => (f.type || "").startsWith("text/") || /\.(txt|md)$/i.test(f.name));
+    if (images.length > 1) {
+      if (draft?.url) URL.revokeObjectURL(draft.url);
+      setDraft({
+        kind: "carousel",
+        name: `Carrusel de ${images.length} diapositivas`,
+        slides: images.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })),
+        text: textFile ? await textFile.text() : "",
+      });
+    } else if (images.length === 1 && textFile) {
+      if (draft?.url) URL.revokeObjectURL(draft.url);
+      setDraft({ kind: "image", name: images[0].name, url: URL.createObjectURL(images[0]), text: await textFile.text() });
+    } else if (files.length) {
+      handleFile(files[0]);
+    }
+  };
   const handleFile = async (file) => {
     const type = file.type || "";
     if (draft?.url) URL.revokeObjectURL(draft.url);
@@ -2527,7 +2684,7 @@ export default function App() {
 
       <main className="gutter pb-28 pt-6 md:ml-[76px] md:pb-12 md:pt-10 xl:ml-[260px]">
         <div className="mx-auto max-w-6xl">
-          <UploadZone onFile={handleFile} onPick={() => fileRef.current?.click()} onPaste={() => setDraft({ kind: "text", name: "Texto pegado", text: "" })} />
+          <UploadZone onFiles={handleFiles} onPick={() => fileRef.current?.click()} onPaste={() => setDraft({ kind: "text", name: "Texto pegado", text: "" })} />
           {view === "dashboard"
             ? <DashboardView posts={posts} analyses={analyses} onOpen={setSelectedId} goContent={() => setView("content")} />
             : <ContentView posts={posts} analyses={analyses} onOpen={setSelectedId} onUpload={() => fileRef.current?.click()} />}
@@ -2547,10 +2704,10 @@ export default function App() {
       </nav>
 
       {selected && <AnalysisPanel post={selected} analysis={analyses[selected.id]} onClose={() => setSelectedId(null)} />}
-      {draft && <DraftPanel key={draft.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} />}
+      {draft && <DraftPanel key={draft.url || draft.slides?.[0]?.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} />}
       <input
-        ref={fileRef} id="draft-file" type="file" accept="image/*,video/*,.mov,.txt,.md,.srt,.vtt,text/plain" className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+        ref={fileRef} id="draft-file" type="file" multiple accept="image/*,video/*,.mov,.txt,.md,.srt,.vtt,text/plain" className="hidden"
+        onChange={(e) => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }}
       />
       {toast && (
         <div className="anim-pop fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-2 rounded-full bg-fg px-4 py-2.5 text-sm font-medium text-bg shadow-xl md:bottom-8" role="status">
