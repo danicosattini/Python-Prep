@@ -26,7 +26,7 @@ import {
   Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb,
   Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
-  Upload, FileText, FileVideo, FileImage, ClipboardPaste,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors,
 } from "lucide-react";
 
 /* ============================================================
@@ -599,12 +599,98 @@ function lumaContrast(source, w, h) {
   return Math.sqrt(Math.max(0, s2 / n - mean * mean));
 }
 
-function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media }) {
+/** Lee subtítulos .srt o .vtt (los que exportan CapCut o Edits) como [{start, end, text}]. */
+function parseSubtitles(raw) {
+  const toSec = (t) => {
+    const p = t.trim().replace(",", ".").split(":").map(Number);
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+  };
+  const cues = [];
+  raw.replace(/\r/g, "").split(/\n\s*\n/).forEach((block) => {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    const i = lines.findIndex((l) => l.includes("-->"));
+    if (i < 0) return;
+    const [a, b] = lines[i].split("-->");
+    const text = lines.slice(i + 1).join(" ").replace(/<[^>]+>/g, "").trim();
+    if (text) cues.push({ start: toSec(a), end: toSec(b.trim().split(/\s+/)[0]), text });
+  });
+  return cues;
+}
+
+/**
+ * Analiza la pista de audio del video en el navegador (sin transcribir):
+ * energía cada 50 ms, inicio del sonido, pausas largas, nivel y saturación.
+ */
+async function analyzeAudio(file) {
+  const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const audio = await new Ctx(1, 1, 44100).decodeAudioData(await file.arrayBuffer());
+  const n = audio.length;
+  const chans = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
+  const fd = 0.05;
+  const win = Math.round(audio.sampleRate * fd);
+  const frames = [];
+  let peak = 0, clipped = 0;
+  for (let i = 0; i < n; i += win) {
+    const end = Math.min(n, i + win);
+    let sum = 0;
+    for (let j = i; j < end; j++) {
+      let v = 0;
+      for (const c of chans) v += c[j];
+      v /= chans.length;
+      sum += v * v;
+      const abs = Math.abs(v);
+      if (abs > peak) peak = abs;
+      if (abs >= 0.99) clipped++;
+    }
+    frames.push(10 * Math.log10(sum / (end - i) + 1e-12));
+  }
+  const peakDb = 20 * Math.log10(peak + 1e-12);
+  const sorted = [...frames].sort((a, b) => a - b);
+  const threshold = Math.max(sorted[Math.floor(sorted.length * 0.95)] - 25, -50);
+  const active = frames.map((d) => d > threshold);
+  const first = active.indexOf(true);
+  const last = active.lastIndexOf(true);
+  const pauses = [];
+  let run = 0, runStart = 0;
+  for (let i = Math.max(first, 0); first >= 0 && i <= last; i++) {
+    if (!active[i]) {
+      if (!run) runStart = i;
+      run++;
+    } else {
+      if (run * fd >= 1.2) pauses.push({ start: runStart * fd, length: run * fd });
+      run = 0;
+    }
+  }
+  const activeDb = frames.filter((_, i) => active[i]);
+  const first3 = active.slice(0, Math.round(3 / fd));
+  const bins = Math.min(160, frames.length);
+  const per = frames.length / bins;
+  const energy = Array.from({ length: bins }, (_, b) => {
+    const from = Math.floor(b * per);
+    return Math.max(...frames.slice(from, Math.max(from + 1, Math.floor((b + 1) * per))));
+  });
+  return {
+    duration: audio.duration,
+    hasAudio: peakDb > -50,
+    startSilence: first < 0 ? audio.duration : first * fd,
+    pauses,
+    level: activeDb.length ? activeDb.reduce((a, b) => a + b, 0) / activeDb.length : -90,
+    clippedPct: (clipped / n) * 100,
+    hookActive: (first3.filter(Boolean).length / Math.max(1, first3.length)) * 100,
+    energy,
+    threshold,
+  };
+}
+
+function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues }) {
   const text = rawText.trim();
   const nt = norm(text);
   const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
   const sentences = text.split(/(?<=[.!?…])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   const firstSentence = sentences[0] || "";
+  // Con subtítulos, el gancho es lo que se dice en los primeros 3 segundos
+  const spokenHook = cues?.length ? cues.filter((c) => c.start < 3).map((c) => c.text).join(" ").trim() : "";
+  const hookSentence = spokenHook || firstSentence;
   const avgLen = sentences.length ? words / sentences.length : 0;
 
   // Jerga: cada término se cuenta una vez por aparición, sin solapar los compuestos
@@ -632,17 +718,17 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media }) {
   const detected = PILLAR_KEYS.reduce((best, k) => (pillarScores[k] > pillarScores[best] ? k : best), "autoridad");
   const pillar = pillarChoice === "auto" ? detected : pillarChoice;
   const P = PILLARS[pillar];
-  const nfs = norm(firstSentence);
+  const nfs = norm(hookSentence);
   const weakOpener = WEAK_OPENERS.some((k) => nfs.startsWith(k));
-  const hookWords = firstSentence.split(/\s+/).filter(Boolean).length;
-  const hookJargon = JARGON.some(([t]) => termRe(t).test(firstSentence));
+  const hookWords = hookSentence.split(/\s+/).filter(Boolean).length;
+  const hookJargon = JARGON.some(([t]) => termRe(t).test(hookSentence));
   const searchHits = countHits(nt, SEARCH_WORDS);
 
   // --- Semáforo previo: 5 criterios
   const pts = { good: 90, warn: 60, bad: 25 };
   const hookStatus = weakOpener || hookJargon ? "bad" : hookWords > 20 ? "warn" : "good";
   const signals = [
-    { key: "hook", label: "Gancho", value: `${hookWords} palabras`, detail: "en la primera frase", status: hookStatus, icon: Zap },
+    { key: "hook", label: "Gancho", value: `${hookWords} palabras`, detail: spokenHook ? "dichas en los primeros 3 s" : "en la primera frase", status: hookStatus, icon: Zap },
     { key: "jargon", label: "Lenguaje accesible", value: `${jargon}/100`, detail: "densidad de jerga", status: jargon < 30 ? "good" : jargon < 60 ? "warn" : "bad", icon: Languages },
     {
       key: "bridge", label: "Puente comercial", value: pillar === "comunidad" && !hasBridge ? "Opcional" : hasBridge ? "Sí" : "No",
@@ -699,7 +785,7 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media }) {
   if (hookStatus !== "good") {
     issues.push({
       id: "hook", sev: hookStatus === "bad" ? "alta" : "media", icon: Zap, title: "Gancho inicial débil",
-      why: `Tu primera frase es “${firstSentence.length > 140 ? `${firstSentence.slice(0, 140)}…` : firstSentence}”. ${weakOpener ? "Empieza con un saludo: en los primeros 3 segundos la gente decide si se queda." : hookJargon ? "Empieza con un concepto académico: quien no lo conoce, se va." : `Tiene ${hookWords} palabras: es demasiado larga para leerse de un vistazo.`}`,
+      why: `${spokenHook ? "En los primeros 3 segundos decís" : "Tu primera frase es"} “${hookSentence.length > 140 ? `${hookSentence.slice(0, 140)}…` : hookSentence}”. ${weakOpener ? "Empieza con un saludo: en los primeros 3 segundos la gente decide si se queda." : hookJargon ? "Empieza con un concepto académico: quien no lo conoce, se va." : `Tiene ${hookWords} palabras: es demasiado larga para leerse de un vistazo.`}`,
       fix: {
         title: "Abrí con el problema del escritor, no con el tema",
         steps: ["Primera frase: una situación que tu alumno ideal vive hoy.", "Texto en pantalla con esa misma frase.", "Prometé qué se va a llevar en menos de 10 palabras."],
@@ -791,10 +877,75 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media }) {
       });
     }
   }
+  // --- Audio del video (señal) y subtítulos (lo que se dice)
+  if (audio) {
+    facts.push(audio.hasAudio ? `sonido desde ${dec(audio.startSilence)} s` : "sin sonido");
+    if (!audio.hasAudio) {
+      issues.push({
+        id: "noaudio", sev: "media", icon: AudioLines, title: "Video sin sonido",
+        why: "La pista de audio está en silencio. Sin voz ni música, el Reel pierde a quien mira con sonido y no suma audios en tendencia.",
+        fix: { title: "Sumá voz o un audio en tendencia", steps: ["Grabá una voz en off contando el proceso.", "Si preferís no hablar, usá un audio en tendencia al 10–15% y texto en pantalla."] },
+      });
+    } else {
+      if (audio.startSilence > 0.7) {
+        issues.push({
+          id: "silence", sev: audio.startSilence > 1.5 ? "alta" : "media", icon: AudioLines, title: "Silencio al inicio",
+          why: `El sonido empieza en el segundo ${dec(audio.startSilence)}. Los primeros 3 segundos deciden si la gente se queda, y estás usando ${pct(Math.min(100, (audio.startSilence / 3) * 100), 0)} de ese tiempo en silencio.`,
+          fix: { title: "Arrancá hablando en el primer fotograma", steps: ["Recortá el silencio inicial en el editor.", "Si querés una pausa dramática, mostrá el gancho como texto en pantalla mientras tanto."] },
+        });
+      }
+      const longest = audio.pauses.reduce((m, x) => (x.length > m.length ? x : m), { length: 0, start: 0 });
+      if (audio.pauses.length >= 2 || longest.length >= 2) {
+        issues.push({
+          id: "pauses", sev: "media", icon: Scissors, title: "Pausas largas en la voz",
+          why: `Hay ${audio.pauses.length} ${audio.pauses.length === 1 ? "pausa" : "pausas"} de más de 1,2 s; la más larga dura ${dec(longest.length)} s y empieza en el segundo ${dec(longest.start)}. En esos huecos la gente pasa al siguiente video.`,
+          fix: { title: "Cortá los silencios con jump cuts", steps: ["Eliminá respiraciones, muletillas y pausas de más de medio segundo.", "Si la pausa es intencional, cubrila con un cambio de plano o texto en pantalla."] },
+        });
+      }
+      if (audio.level < -32) {
+        issues.push({
+          id: "volume", sev: "baja", icon: AudioLines, title: "Volumen bajo",
+          why: `La voz está en ${Math.round(audio.level)} dB de nivel medio: en el celular se va a escuchar baja comparada con otros Reels.`,
+          fix: { title: "Normalizá el audio", steps: ["En CapCut o Edits, usá “Normalizar volumen” o subí la voz hasta que los picos queden cerca de −1 dB.", "Si hay música de fondo, dejala bastante por debajo de la voz."] },
+        });
+      }
+      if (audio.clippedPct > 0.05) {
+        issues.push({
+          id: "clipping", sev: "baja", icon: AudioLines, title: "Audio saturado",
+          why: "Hay picos que llegan al máximo y se distorsionan: la voz va a sonar rota en algunos momentos.",
+          fix: { title: "Bajá la ganancia o regrabá más lejos del micrófono", steps: ["Bajá el volumen de la pista hasta que no haya picos al máximo.", "En la próxima grabación, alejá el micrófono un palmo de la boca."] },
+        });
+      }
+    }
+  }
+  if (cues?.length) {
+    const total = cues[cues.length - 1].end;
+    const spokenWords = cues.reduce((a, c) => a + c.text.split(/\s+/).filter(Boolean).length, 0);
+    const spokenSecs = cues.reduce((a, c) => a + Math.max(0, c.end - c.start), 0);
+    const wpm = spokenSecs ? (spokenWords / spokenSecs) * 60 : 0;
+    facts.push(`${Math.round(wpm)} palabras/min`);
+    if (wpm > 190) {
+      issues.push({
+        id: "fast", sev: "baja", icon: AudioLines, title: "Hablás muy rápido",
+        why: `Vas a ${Math.round(wpm)} palabras por minuto. Con conceptos teóricos, a esa velocidad el oyente no llega a procesar la idea.`,
+        fix: { title: "Bajá a unas 150 palabras por minuto", steps: ["Recortá el guion antes que acelerar.", "Dejá medio segundo después de cada idea clave, con texto en pantalla."] },
+      });
+    }
+    const ctaCue = cues.find((c) => BRIDGE_WORDS.some((k) => norm(c.text).includes(k)));
+    if (ctaCue && total > 20 && ctaCue.start > total * 0.85) {
+      issues.push({
+        id: "latecta", sev: "baja", icon: Briefcase, title: "El llamado a la acción llega tarde",
+        why: `Mencionás tus talleres en el segundo ${Math.round(ctaCue.start)} de ${Math.round(total)}: para entonces gran parte de la audiencia ya se fue.`,
+        fix: { title: "Adelantá el llamado a la acción", steps: ["Decilo una vez a mitad del video y repetilo al final.", "Escribilo también en la primera línea del texto del post."] },
+      });
+    }
+  }
   issues.sort((x, y) => SEV_ORDER[x.sev] - SEV_ORDER[y.sev]);
 
   const strengths = [];
-  if (hookStatus === "good") strengths.push(`Gancho directo: la primera frase tiene ${hookWords} palabras y no arranca con saludos.`);
+  if (hookStatus === "good") strengths.push(`Gancho directo: ${spokenHook ? "lo que decís en los primeros 3 segundos" : "la primera frase"} tiene ${hookWords} palabras y no arranca con saludos.`);
+  if (audio?.hasAudio && audio.startSilence <= 0.4) strengths.push(`Arrancás con sonido desde el segundo ${dec(audio.startSilence)}.`);
+  if (audio?.hasAudio && !audio.pauses.length) strengths.push("Ritmo de voz continuo, sin pausas largas.");
   if (jargon < 30) strengths.push("Lenguaje accesible para un escritor aficionado.");
   if (hasBridge) strengths.push("Tiene puente comercial: el lector sabe que puede aprender esto con vos.");
   if (vulnerability) strengths.push("Mostrás tu proceso real: la gente se identifica con vos, no solo con el tema.");
@@ -1626,6 +1777,59 @@ function AnalysisPanel({ post, analysis, onClose }) {
   );
 }
 
+/** Energía del audio en el tiempo, con el segundo 3 y las pausas marcadas. */
+function AudioCard({ audio }) {
+  if (audio === "loading") {
+    return <Card className="flex items-center gap-3 p-5 text-sm text-muted"><AudioLines className="h-4 w-4 animate-pulse text-accent" /> Analizando el audio del video…</Card>;
+  }
+  if (!audio || audio.error) {
+    return (
+      <Card className="flex items-start gap-3 p-5 text-sm text-muted">
+        <AudioLines className="mt-0.5 h-4 w-4 shrink-0" />
+        No se pudo leer el audio: el video no tiene pista de sonido o el navegador no reconoce su formato (pasa con algunos .mov de iPhone). Exportalo como .mp4 y volvé a subirlo.
+      </Card>
+    );
+  }
+  const W = 640, H = 120, pl = 8, pr = 8, pt = 18, pb = 22;
+  const x = (t) => pl + (t / audio.duration) * (W - pl - pr);
+  const bw = (W - pl - pr) / audio.energy.length;
+  const y = (db) => pt + (1 - clamp((db + 60) / 60, 0, 1)) * (H - pt - pb);
+  const ticks = [0, 3, ...[0.5].map((f) => Math.round(audio.duration * f)), Math.floor(audio.duration)].filter((t, i, arr) => arr.indexOf(t) === i);
+  return (
+    <Card className="p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><AudioLines className="h-4 w-4 text-accent" /> Audio del video</h4>
+        <span className="font-mono text-xs text-muted">ámbar: silencio inicial · rojo: pausas de más de 1,2 s</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[460px]" role="img" aria-label="Energía del audio a lo largo del video">
+          {audio.pauses.map((p) => <rect key={p.start} x={x(p.start)} y={pt} width={Math.max(2, x(p.start + p.length) - x(p.start))} height={H - pt - pb} className="fill-bad/15" />)}
+          {audio.startSilence > 0.05 && <rect x={x(0)} y={pt} width={x(Math.min(audio.startSilence, audio.duration)) - x(0)} height={H - pt - pb} className="fill-warn/15" />}
+          {audio.energy.map((db, i) => (
+            <rect key={i} x={pl + i * bw + 0.5} y={y(db)} width={Math.max(1, bw - 1)} height={H - pb - y(db)} rx="1" className={db > audio.threshold ? "fill-accent" : "fill-fg/20"} />
+          ))}
+          <line x1={x(3)} x2={x(3)} y1={pt - 4} y2={H - pb} strokeDasharray="4 4" className="stroke-fg/50" />
+          <text x={x(3) + 6} y={pt - 6} className="fill-fg text-[11px] font-semibold">Segundo 3</text>
+          {ticks.map((t) => <text key={t} x={x(t)} y={H - 6} textAnchor="middle" className="fill-muted font-mono text-[10px]">{t}s</text>)}
+        </svg>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { l: "El sonido empieza en", v: audio.hasAudio ? `${dec(audio.startSilence)} s` : "—" },
+          { l: "Sonido en los primeros 3 s", v: pct(audio.hookActive, 0) },
+          { l: "Pausas largas", v: audio.pauses.length },
+          { l: "Nivel medio de la voz", v: audio.hasAudio ? `${Math.round(audio.level)} dB` : "—" },
+        ].map((m) => (
+          <div key={m.l} className="rounded-xl bg-surface2 p-3">
+            <div className="font-mono text-lg font-semibold tabular-nums">{m.v}</div>
+            <div className="text-[11px] leading-tight text-muted">{m.l}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /** Zona de arrastrar y soltar para revisar un post antes de publicarlo. */
 function UploadZone({ onFile, onPick, onPaste }) {
   const [over, setOver] = useState(false);
@@ -1644,7 +1848,7 @@ function UploadZone({ onFile, onPick, onPaste }) {
       <span className="brand-grad grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white"><Upload className="h-5 w-5" /></span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">{over ? "Soltalo para analizarlo" : "Revisá un post antes de publicarlo"}</p>
-        <p className="text-xs leading-relaxed text-muted">Arrastrá acá una imagen, un video o un archivo .txt con el texto. Lo analizo con los mismos criterios y te muestro qué corregir.</p>
+        <p className="text-xs leading-relaxed text-muted">Arrastrá acá un video, una imagen, los subtítulos (.srt) o un .txt con el texto. Analizo texto, audio y formato con los mismos criterios y te muestro qué corregir.</p>
       </div>
       <div className="flex shrink-0 gap-2">
         <button onClick={onPick} className="brand-grad inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110 sm:flex-none">
@@ -1669,7 +1873,26 @@ function DraftPanel({ draft, onClose }) {
   const [text, setText] = useState(draft.text || "");
   const [pillar, setPillar] = useState("auto");
   const [media, setMedia] = useState(null);
+  const [audio, setAudio] = useState(draft.kind === "video" ? "loading" : null);
+  const [cues, setCues] = useState(draft.cues || null);
+  const subsRef = useRef(null);
   const panelRef = useRef(null);
+
+  // Audio: se decodifica la pista del video en el navegador
+  useEffect(() => {
+    if (draft.kind !== "video" || !draft.file) return;
+    let cancelled = false;
+    analyzeAudio(draft.file).then((a) => !cancelled && setAudio(a), () => !cancelled && setAudio({ error: true }));
+    return () => { cancelled = true; };
+  }, [draft]);
+
+  const loadSubtitles = async (file) => {
+    const parsed = parseSubtitles(await file.text());
+    if (!parsed.length) return;
+    setCues(parsed);
+    const spoken = parsed.map((c) => c.text).join(" ");
+    setText((t) => (t.trim() ? `${spoken}\n\n${t}` : spoken));
+  };
   useEffect(() => panelRef.current?.focus(), []);
 
   // Medir el archivo visual en el navegador: dimensiones, duración y contraste
@@ -1703,7 +1926,8 @@ function DraftPanel({ draft, onClose }) {
     return () => { cancelled = true; };
   }, [draft]);
 
-  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media }), [draft.kind, text, pillar, media]);
+  const audioReady = audio && audio !== "loading" && !audio.error ? audio : null;
+  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues }), [draft.kind, text, pillar, media, audioReady, cues]);
   const Kind = DRAFT_KIND[draft.kind];
   const hasText = analysis.words > 0;
   const verdict = {
@@ -1754,8 +1978,20 @@ function DraftPanel({ draft, onClose }) {
                   className="w-full resize-y rounded-xl border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition placeholder:text-muted focus:border-accent"
                 />
                 <p className="mt-1.5 text-xs text-muted">
-                  {draft.kind === "video" ? "El audio no se transcribe: el análisis de lenguaje usa este texto. Del video se miden duración, proporción y contraste del primer fotograma." : "El análisis se actualiza mientras escribís."}
+                  {draft.kind === "video"
+                    ? "El audio se analiza solo (silencios, pausas, volumen). Para analizar lo que decís, cargá los subtítulos que exporta CapCut o Edits, o pegá el guion."
+                    : "El análisis se actualiza mientras escribís."}
                 </p>
+                {draft.kind === "video" && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button onClick={() => subsRef.current?.click()} className="inline-flex items-center gap-2 rounded-full border border-line px-3.5 py-1.5 text-xs font-semibold transition hover:bg-surface2">
+                      <Captions className="h-3.5 w-3.5" /> {cues ? "Cambiar subtítulos" : "Cargar subtítulos (.srt / .vtt)"}
+                    </button>
+                    {cues && <span className="text-xs text-muted">{cues.length} líneas cargadas: el gancho se mide con lo que decís en los primeros 3 s.</span>}
+                    <input ref={subsRef} id="draft-subs" type="file" accept=".srt,.vtt,text/vtt" className="hidden"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) loadSubtitles(f); e.target.value = ""; }} />
+                  </div>
+                )}
               </div>
               <div>
                 <label htmlFor="draft-pillar" className="mb-1.5 block text-xs font-semibold text-muted">Pilar de contenido</label>
@@ -1766,6 +2002,8 @@ function DraftPanel({ draft, onClose }) {
               </div>
             </div>
           </div>
+
+          {draft.kind === "video" && <AudioCard audio={audio} />}
 
           {hasText && (
             <>
@@ -1892,9 +2130,13 @@ export default function App() {
     const type = file.type || "";
     if (draft?.url) URL.revokeObjectURL(draft.url);
     if (type.startsWith("image/")) setDraft({ kind: "image", name: file.name, url: URL.createObjectURL(file), text: "" });
-    else if (type.startsWith("video/")) setDraft({ kind: "video", name: file.name, url: URL.createObjectURL(file), text: "" });
+    else if (type.startsWith("video/") || /\.(mov|mp4|m4v|webm)$/i.test(file.name)) setDraft({ kind: "video", name: file.name, url: URL.createObjectURL(file), file, text: "" });
+    else if (/\.(srt|vtt)$/i.test(file.name)) {
+      const cues = parseSubtitles(await file.text());
+      setDraft({ kind: "text", name: file.name, text: cues.map((c) => c.text).join(" "), cues });
+    }
     else if (type.startsWith("text/") || /\.(txt|md)$/i.test(file.name)) setDraft({ kind: "text", name: file.name, text: await file.text() });
-    else setToast("Ese formato no se puede analizar. Subí una imagen, un video o un archivo .txt con el texto.");
+    else setToast("Ese formato no se puede analizar. Subí un video, una imagen, subtítulos (.srt) o un archivo .txt.");
   };
   useEffect(() => {
     if (!toast) return;
@@ -1974,7 +2216,7 @@ export default function App() {
       {selected && <AnalysisPanel post={selected} analysis={analyses[selected.id]} onClose={() => setSelectedId(null)} />}
       {draft && <DraftPanel key={draft.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} />}
       <input
-        ref={fileRef} id="draft-file" type="file" accept="image/*,video/*,.txt,.md,text/plain" className="hidden"
+        ref={fileRef} id="draft-file" type="file" accept="image/*,video/*,.mov,.txt,.md,.srt,.vtt,text/plain" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
       />
       {toast && (
