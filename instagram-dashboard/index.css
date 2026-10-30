@@ -1,4 +1,5 @@
-/* Layout: barra lateral fija estilo Instagram + lienzo central de tarjetas; panel lateral para el análisis. */
+/* Layout: barra lateral fija estilo Instagram; tipografía editorial (serif itálica) para portadas y diagnósticos.
+   Base: + lienzo central de tarjetas; panel lateral para el análisis. */
 :root {
   /* Neutros con leve sesgo magenta; el degradado de marca se usa solo en acciones y marca. */
   --bg: 250 249 251;
@@ -13,19 +14,23 @@
   --good: 22 150 72;
   --warn: 202 120 6;
   --bad: 214 40 40;
+  /* Pilares: autoridad (tinta), proceso (terracota), comunidad (salvia) */
+  --p1: 47 84 150;
+  --p2: 184 92 56;
+  --p3: 74 124 89;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: 11 9 14; --surface: 21 18 26; --surface2: 31 27 37; --line: 46 41 54;
     --fg: 244 241 247; --muted: 160 151 173; --accent: 240 80 152; --accent2: 157 107 255; --accent3: 250 152 72;
-    --good: 74 222 128; --warn: 251 191 36; --bad: 248 113 113;
+    --good: 74 222 128; --warn: 251 191 36; --bad: 248 113 113; --p1: 125 165 235; --p2: 236 145 105; --p3: 130 190 145;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: 11 9 14; --surface: 21 18 26; --surface2: 31 27 37; --line: 46 41 54;
   --fg: 244 241 247; --muted: 160 151 173; --accent: 240 80 152; --accent2: 157 107 255; --accent3: 250 152 72;
-  --good: 74 222 128; --warn: 251 191 36; --bad: 248 113 113;
+  --good: 74 222 128; --warn: 251 191 36; --bad: 248 113 113; --p1: 125 165 235; --p2: 236 145 105; --p3: 130 190 145;
   color-scheme: dark;
 }
 
@@ -44,7 +49,7 @@ h1, h2, h3 { text-wrap: balance; }
 .panel-head { padding-top: env(safe-area-inset-top, 0px); }
 .safe-bottom { padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
 
-.ig-grad { background: linear-gradient(45deg, rgb(var(--accent3)), rgb(var(--accent)) 55%, rgb(var(--accent2))); }
+.brand-grad { background: linear-gradient(45deg, rgb(var(--accent3)), rgb(var(--accent)) 55%, rgb(var(--accent2))); }
 .glow { box-shadow: 0 0 10px 1px var(--glow); }
 
 :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }

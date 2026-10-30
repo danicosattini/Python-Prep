@@ -20,11 +20,11 @@ const js = execFileSync(bin("esbuild"), [entry, "--bundle", "--minify", "--forma
 const css = execFileSync(bin("tailwindcss"), ["-c", path.join(here, "tailwind.config.js"), "-i", path.join(here, "index.css"), "--minify"],
   { cwd: here, maxBuffer: 64 << 20 }).toString();
 
-const html = `<title>Reelscope</title>
+const html = `<title>Reelscope Autoridad</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..700&family=JetBrains+Mono:wght@400;600&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&display=swap">
 <style>${css}</style>
 <div id="root"></div>
 <script>${js.replace(/<\/script/gi, "<\\/script")}</script>

@@ -1,6 +1,6 @@
-# Reelscope · Simulador de Dashboard de Instagram
+# Reelscope Autoridad · Simulador de captación para talleres de escritura
 
-SPA en React + Tailwind CSS + lucide-react que analiza publicaciones (Reels, carruseles y fotos) y explica qué funciona, qué no y cómo mejorarlo.
+SPA en React + Tailwind CSS + lucide-react que analiza el contenido de una socióloga, investigadora y escritora para medir si construye **autoridad** y atrae **futuros alumnos** de talleres y mentorías editoriales.
 
 - `InstagramDashboardSimulator.jsx`: la app completa en un solo componente (`export default App`).
 - `tailwind.config.js` + `index.css`: tokens de color (modo claro/oscuro) que usa el componente.
@@ -23,4 +23,7 @@ node build.mjs deps
 
 ## Cómo analiza
 
-Todo el análisis sale de `analyzePost()`: cinco señales (gancho, retención, alcance nuevo, interacción, conversión) con umbrales rojo/verde, un puntaje ponderado y reglas que detectan errores (gancho débil, sin CTA, poco contraste, audio fuera de tendencia, ritmo lento, etc.). Cada error trae su plan de acción. Los enlaces importados generan métricas simuladas y deterministas: no hay conexión real con Instagram.
+- **Pilares:** Autoridad y Teoría (meta 40%), Detrás de Escena / Proceso (35%), Comunidad y Reflexión (25%).
+- **Índices de conversión:** Autoridad = (guardados + compartidos) / alcance; Intención de compra = comentarios de valor cada 1.000 cuentas; Conexión humana = mensajes directos cada 1.000 cuentas. En la cuenta se usa la mediana por publicación para que un post viral no infle el diagnóstico.
+- **Diagnósticos:** Falta de Puente Comercial, Exceso Académico / Jerga, Falta de Vulnerabilidad, además de comentarios superficiales, reflexiones sin pregunta, gancho débil, alcance cautivo y portada poco legible. Cada uno trae su plan de acción.
+- Los enlaces importados generan métricas simuladas y deterministas: no hay conexión real con Instagram.
