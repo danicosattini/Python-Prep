@@ -26,7 +26,7 @@ import {
   Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb,
   Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
-  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move,
 } from "lucide-react";
 
 /* ============================================================
@@ -217,11 +217,37 @@ function scoreFrom(v, red, green) {
 const statusOf = (score) => (score >= 72 ? "good" : score >= 50 ? "warn" : "bad");
 const SEV_ORDER = { alta: 0, media: 1, baja: 2 };
 
-/** Umbrales de los tres índices de conversión (rojo, verde). */
+/**
+ * Dos objetivos, con pesos distintos:
+ *  - Captación (principal, 60%): que te vean como alguien de quien aprender y te pregunten por talleres.
+ *  - Crecimiento (40%): que te descubra gente nueva, te siga, comparta y comente.
+ */
+const GOAL_WEIGHT = { captacion: 0.6, crecimiento: 0.4 };
+const GOALS = {
+  captacion: { label: "Captación", sub: "objetivo principal: alumnos para talleres y mentorías", tag: "bg-accent/12 text-accent" },
+  crecimiento: { label: "Crecimiento", sub: "que te descubran, te sigan, compartan y comenten", tag: "bg-p1/12 text-p1" },
+  ambos: { label: "Captación y crecimiento", tag: "bg-fg/5 text-fg" },
+};
+/** A qué objetivo afecta cada problema detectado. */
+const GOAL_OF = {
+  bridge: "captacion", vulnerability: "captacion", shallow: "captacion", question: "captacion", latecta: "captacion",
+  jargon: "ambos",
+  hook: "crecimiento", captive: "crecimiento", cover: "crecimiento", shares: "crecimiento", follows: "crecimiento",
+  noaudio: "crecimiento", silence: "crecimiento", pauses: "crecimiento", volume: "crecimiento", clipping: "crecimiento",
+  fast: "crecimiento", length: "crecimiento", ratio: "crecimiento", pace: "crecimiento", static: "crecimiento", dark: "crecimiento",
+};
+const GOAL_ORDER = { captacion: 0, ambos: 0, crecimiento: 1 };
+/** Ordena por gravedad y, a igual gravedad, primero lo que afecta a la captación (objetivo principal). */
+const byPriority = (x, y) => SEV_ORDER[x.sev] - SEV_ORDER[y.sev] || GOAL_ORDER[x.goal] - GOAL_ORDER[y.goal];
+
+/** Umbrales (rojo, verde) de los índices de captación y crecimiento. */
 const KPI = {
   authority: { red: 1.5, green: 4, label: "Índice de Autoridad", sub: "Guardados + compartidos sobre alcance", unit: "%" },
   intent: { red: 1.5, green: 4, label: "Intención de Compra", sub: "Comentarios de valor cada 1.000 cuentas", unit: "‰" },
   connection: { red: 1, green: 3, label: "Conexión Humana", sub: "Mensajes directos cada 1.000 cuentas", unit: "‰" },
+  reachNew: { red: 20, green: 40, label: "Alcance nuevo", sub: "% del alcance que no te seguía", unit: "%" },
+  shares: { red: 3, green: 8, label: "Compartidos", sub: "Envíos y compartidos cada 1.000 cuentas", unit: "‰" },
+  follows: { red: 2, green: 6, label: "Seguidores nuevos", sub: "Cada 1.000 cuentas alcanzadas", unit: "‰" },
 };
 
 function computeIndices(post) {
@@ -259,17 +285,30 @@ function analyzePost(post) {
     retention = { label: "Lectura del texto", value: pct(a.readMorePct, 0), detail: "abrió el texto completo", score: scoreFrom(a.readMorePct, 25, 45), icon: BookOpen };
   }
 
-  const signals = [
-    { key: "authority", label: "Autoridad", value: pct(idx.authority), detail: "guardó o compartió", score: scoreFrom(idx.authority, KPI.authority.red, KPI.authority.green), icon: BookmarkCheck },
-    { key: "intent", label: "Intención de compra", value: `${dec(idx.intent)} ‰`, detail: "comentarios de valor", score: scoreFrom(idx.intent, KPI.intent.red, KPI.intent.green), icon: MessageSquareQuote },
-    { key: "connection", label: "Conexión humana", value: `${dec(idx.connection)} ‰`, detail: "mensajes directos", score: scoreFrom(idx.connection, KPI.connection.red, KPI.connection.green), icon: HeartHandshake },
-    { key: "reach", label: "Alcance nuevo", value: pct(m.nonFollowerPct, 0), detail: "no te seguía", score: scoreFrom(m.nonFollowerPct, 20, 40), icon: Users },
-    { key: "retention", ...retention },
+  const sharesK = (m.shares / m.reach) * 1000;
+  const followsK = (m.follows / m.reach) * 1000;
+  const capSignals = [
+    { key: "authority", w: 0.35, label: "Autoridad", value: pct(idx.authority), detail: "guardó o compartió", score: scoreFrom(idx.authority, KPI.authority.red, KPI.authority.green), icon: BookmarkCheck },
+    { key: "intent", w: 0.35, label: "Intención de compra", value: `${dec(idx.intent)} ‰`, detail: "comentarios de valor", score: scoreFrom(idx.intent, KPI.intent.red, KPI.intent.green), icon: MessageSquareQuote },
+    { key: "connection", w: 0.3, label: "Conexión humana", value: `${dec(idx.connection)} ‰`, detail: "mensajes directos", score: scoreFrom(idx.connection, KPI.connection.red, KPI.connection.green), icon: HeartHandshake },
   ];
+  const growSignals = [
+    { key: "reach", w: 0.3, label: "Alcance nuevo", value: pct(m.nonFollowerPct, 0), detail: "no te seguía", score: scoreFrom(m.nonFollowerPct, KPI.reachNew.red, KPI.reachNew.green), icon: Users },
+    { key: "retention", w: 0.25, ...retention },
+    { key: "shares", w: 0.25, label: "Compartidos", value: `${dec(sharesK)} ‰`, detail: "envíos cada 1.000 cuentas", score: scoreFrom(sharesK, KPI.shares.red, KPI.shares.green), icon: Repeat2 },
+    { key: "follows", w: 0.2, label: "Seguidores nuevos", value: `${dec(followsK)} ‰`, detail: "cada 1.000 cuentas", score: scoreFrom(followsK, KPI.follows.red, KPI.follows.green), icon: UserPlus },
+  ];
+  const signals = [...capSignals, ...growSignals];
   signals.forEach((s) => (s.status = statusOf(s.score)));
-  const weights = { authority: 0.25, intent: 0.25, connection: 0.2, reach: 0.15, retention: 0.15 };
-  const score = Math.round(signals.reduce((acc, s) => acc + s.score * weights[s.key], 0));
+  const groupScore = (list) => Math.round(list.reduce((acc, s) => acc + s.score * s.w, 0));
+  const capScore = groupScore(capSignals);
+  const growScore = groupScore(growSignals);
+  const score = Math.round(capScore * GOAL_WEIGHT.captacion + growScore * GOAL_WEIGHT.crecimiento);
   const status = statusOf(score);
+  const groups = [
+    { key: "captacion", score: capScore, status: statusOf(capScore), signals: capSignals },
+    { key: "crecimiento", score: growScore, status: statusOf(growScore), signals: growSignals },
+  ];
   const byKey = Object.fromEntries(signals.map((s) => [s.key, s]));
 
   // --- Diagnóstico orientado a venta de servicios
@@ -386,7 +425,40 @@ function analyzePost(post) {
       fix: { title: "Portada con contraste y una promesa concreta", steps: ["Máximo 6 palabras.", "Texto claro sobre fondo oscuro o al revés.", "Prometé un resultado para el escritor, no un tema académico."] },
     });
   }
-  issues.sort((x, y) => SEV_ORDER[x.sev] - SEV_ORDER[y.sev]);
+  if (sharesK < KPI.shares.red) {
+    add({
+      id: "shares", sev: "media", icon: Repeat2,
+      title: "Poco compartible",
+      why: `Se compartió ${full(m.shares)} ${m.shares === 1 ? "vez" : "veces"} (${dec(sharesK)} por cada mil cuentas). Los envíos por mensaje son la señal que más empuja una publicación hacia gente que no te sigue.`,
+      fix: {
+        title: "Hacelo enviable",
+        steps: [
+          "Estructurá la idea como lista con número (“3 errores…”, “5 preguntas…”): se guarda y se manda más.",
+          "Nombrá a quién mandárselo: una persona concreta que tu lector conoce.",
+          "Dejá una frase citable en pantalla, de las que dan ganas de compartir en historias.",
+        ],
+        example: "Mandáselo a esa amiga que hace años dice que va a escribir su novela.",
+      },
+    });
+  }
+  if (followsK < KPI.follows.red) {
+    add({
+      id: "follows", sev: "media", icon: UserPlus,
+      title: "No suma seguidores",
+      why: `Ganaste ${full(m.follows)} ${m.follows === 1 ? "seguidor" : "seguidores"} (${dec(followsK)} por cada mil cuentas). Quien te descubre no encuentra una razón para volver.`,
+      fix: {
+        title: "Dale una razón para seguirte",
+        steps: [
+          "Convertí el tema en serie: “Parte 1 de 3” en la portada y en los primeros segundos.",
+          "Anunciá la próxima entrega con día: “el jueves subo…”.",
+          "Si el post ya pide que te escriban por talleres, poné el pedido de seguirte en el texto, no en el video: un solo pedido por pieza.",
+        ],
+        example: "Esto es la parte 1. Seguime: el jueves subo cómo resolví el capítulo 13.",
+      },
+    });
+  }
+  issues.forEach((i) => (i.goal = GOAL_OF[i.id] || "captacion"));
+  issues.sort(byPriority);
 
   // --- Lo que funcionó
   const strengths = [];
@@ -397,10 +469,12 @@ function analyzePost(post) {
   if (a.commercialBridge) strengths.push("Tiene puente comercial: el lector sabe que puede aprender esto con vos.");
   if (m.nonFollowerPct >= 40) strengths.push(`Te descubre gente nueva: el ${m.nonFollowerPct}% no te seguía.`);
   if (a.jargon < 30) strengths.push("Lenguaje accesible para un escritor aficionado.");
+  if (sharesK >= KPI.shares.green) strengths.push(`Se comparte: ${full(m.shares)} envíos (${dec(sharesK)} por cada mil cuentas). Es lo que lo lleva a gente nueva.`);
+  if (followsK >= KPI.follows.green) strengths.push(`Suma seguidores: ${full(m.follows)} nuevos (${dec(followsK)} por cada mil cuentas).`);
 
   // --- Plan de acción
   const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
-  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon }));
+  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon, goal: i.goal }));
   if (!issues.length) {
     plan = [
       {
@@ -422,7 +496,10 @@ function analyzePost(post) {
     ];
   }
 
-  return { score, status, signals, issues, strengths, plan, ret3, avgWatch, swipe, completion, ...idx };
+  return {
+    score, status, capScore, growScore, groups, signals, issues, strengths, plan, ret3, avgWatch, swipe, completion, ...idx,
+    reachNew: m.nonFollowerPct, shares: sharesK, follows: followsK,
+  };
 }
 
 /* ============================================================
@@ -437,12 +514,20 @@ function analyzeAccount(posts, analyses) {
     const mid = Math.floor(v.length / 2);
     return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
   };
-  const kpis = Object.fromEntries(["authority", "intent", "connection"].map((k) => [k, median(posts.map((p) => analyses[p.id][k]))]));
+  const kpis = Object.fromEntries(Object.keys(KPI).map((k) => [k, median(posts.map((p) => analyses[p.id][k]))]));
   const kpisWeighted = {
     authority: (sum(posts, (p) => p.metrics.saves + p.metrics.shares) / reach) * 100,
     intent: (sum(posts, (p) => p.metrics.comments.value) / reach) * 1000,
     connection: (sum(posts, (p) => p.metrics.dms) / reach) * 1000,
+    reachNew: (sum(posts, (p) => (p.metrics.reach * p.metrics.nonFollowerPct) / 100) / reach) * 100,
+    shares: (sum(posts, (p) => p.metrics.shares) / reach) * 1000,
+    follows: (sum(posts, (p) => p.metrics.follows) / reach) * 1000,
   };
+  const growth = Math.round(
+    scoreFrom(kpis.reachNew, KPI.reachNew.red, KPI.reachNew.green) * 0.35 +
+      scoreFrom(kpis.shares, KPI.shares.red, KPI.shares.green) * 0.35 +
+      scoreFrom(kpis.follows, KPI.follows.red, KPI.follows.green) * 0.3
+  );
   const kpiStatus = Object.fromEntries(Object.entries(kpis).map(([k, v]) => [k, statusOf(scoreFrom(v, KPI[k].red, KPI[k].green))]));
   const readiness = Math.round(
     (scoreFrom(kpis.authority, KPI.authority.red, KPI.authority.green) * 0.35 +
@@ -519,7 +604,7 @@ function analyzeAccount(posts, analyses) {
   const recurring = Object.values(issueMap).sort((a, b) => b.count - a.count || SEV_ORDER[a.sev] - SEV_ORDER[b.sev]).slice(0, 5);
   const ranked = [...posts].sort((a, b) => analyses[b.id].score - analyses[a.id].score);
 
-  return { reach, kpis, kpisWeighted, kpiStatus, readiness, pillars, funnel, findings, bestIntent, bestConn, bestAuth, recurring, ranked };
+  return { reach, kpis, kpisWeighted, kpiStatus, readiness, growth, pillars, funnel, findings, bestIntent, bestConn, bestAuth, recurring, ranked };
 }
 
 /* ============================================================
@@ -682,7 +767,63 @@ async function analyzeAudio(file) {
   };
 }
 
-function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues }) {
+/**
+ * Analiza la imagen del video en el navegador: compara fotogramas cada ~0,3 s
+ * para contar cortes de plano, medir el movimiento y la luz.
+ */
+async function analyzeVisual(url) {
+  const v = document.createElement("video");
+  v.muted = true;
+  v.preload = "auto";
+  v.playsInline = true;
+  v.src = url;
+  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = rej; });
+  const duration = v.duration;
+  const W = 32, H = 56;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  const step = clamp(duration / 150, 0.25, 1);
+  let prev = null, lumaSum = 0, n = 0;
+  const diffs = [];
+  for (let t = 0.05; t < duration; t += step) {
+    await new Promise((res) => { v.onseeked = res; v.currentTime = t; });
+    ctx.drawImage(v, 0, 0, W, H);
+    const d = ctx.getImageData(0, 0, W, H).data;
+    let mean = 0;
+    for (let i = 0; i < d.length; i += 4) mean += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    lumaSum += mean / (W * H);
+    n++;
+    if (prev) {
+      // Diferencia de color (no solo de brillo): detecta cortes entre planos de luz parecida
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += Math.abs(d[i] - prev[i]) + Math.abs(d[i + 1] - prev[i + 1]) + Math.abs(d[i + 2] - prev[i + 2]);
+      diffs.push({ t, d: sum / (3 * W * H) });
+    }
+    prev = d.slice();
+  }
+  // Un salto grande entre fotogramas consecutivos es un corte; el resto, movimiento
+  const cuts = diffs.filter((x) => x.d > 28).map((x) => x.t);
+  const motion = diffs.length ? diffs.reduce((a, x) => a + Math.min(x.d, 28), 0) / diffs.length : 0;
+  const early = diffs.filter((x) => x.t <= 3);
+  return {
+    duration,
+    cuts,
+    avgShot: duration / (cuts.length + 1),
+    brightness: n ? lumaSum / n : 0,
+    motion,
+    earlyChange: early.length ? Math.max(...early.map((x) => x.d)) : 0,
+  };
+}
+
+/** Señales de que la pieza se va a compartir o va a hacer que te sigan. */
+const SHARE_WORDS = ["mandaselo", "mandale", "compartilo", "compartelo", "etiqueta", "envialo", "pasaselo", "guardalo", "guardate"];
+const FOLLOW_WORDS = ["seguime", "sigueme", "parte 1", "parte 2", "primera parte", "proximo video", "proxima entrega", "manana subo", "la semana que viene", "serie", "no te pierdas"];
+const CURIOSITY = /\?|\d|nadie|error|secreto|por que|lo que|mito|nunca|deja de|dejá de|no es|verdad|cuidado|asi es como|el truco/;
+const NUMBERED = /(^|\s)(\d+|dos|tres|cuatro|cinco|seis|siete|diez)\s+(errores|claves|pasos|preguntas|libros|ejercicios|trucos|senales|razones|cosas|formas|autores|bloqueos)/;
+
+function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio, cues, visual }) {
   const text = rawText.trim();
   const nt = norm(text);
   const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
@@ -724,11 +865,33 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   const hookJargon = JARGON.some(([t]) => termRe(t).test(hookSentence));
   const searchHits = countHits(nt, SEARCH_WORDS);
 
-  // --- Semáforo previo: 5 criterios
+  const curiosity = CURIOSITY.test(nfs);
+  const shareTrigger = SHARE_WORDS.some((k) => nt.includes(k)) || NUMBERED.test(nt);
+  const followTrigger = FOLLOW_WORDS.some((k) => nt.includes(k));
+
+  // --- Semáforo previo: captación (4 criterios) y crecimiento (5 criterios)
   const pts = { good: 90, warn: 60, bad: 25 };
-  const hookStatus = weakOpener || hookJargon ? "bad" : hookWords > 20 ? "warn" : "good";
-  const signals = [
-    { key: "hook", label: "Gancho", value: `${hookWords} palabras`, detail: spokenHook ? "dichas en los primeros 3 s" : "en la primera frase", status: hookStatus, icon: Zap },
+  const hookStatus = weakOpener || hookJargon ? "bad" : hookWords > 20 || !curiosity ? "warn" : "good";
+  // Atractivo visual: ritmo de cortes en video, contraste en imagen
+  let visualSignal;
+  if (kind === "video") {
+    const st = !visual ? "warn" : visual.avgShot <= 2.5 ? "good" : visual.avgShot <= 4 ? "warn" : "bad";
+    visualSignal = { key: "visual", label: "Ritmo visual", value: visual ? `${dec(visual.avgShot)} s` : "…", detail: "por plano, en promedio", status: st, icon: Move };
+  } else if (kind === "image") {
+    const ctr = media?.contrast;
+    const st = ctr == null ? "warn" : ctr >= 55 ? "good" : ctr >= 40 ? "warn" : "bad";
+    visualSignal = { key: "visual", label: "Impacto visual", value: ctr == null ? "…" : `${Math.round(ctr)}/255`, detail: "contraste de la imagen", status: st, icon: Sun };
+  } else {
+    visualSignal = { key: "visual", label: "Impacto visual", value: "Sin imagen", detail: "subí la portada o el video", status: "warn", icon: Sun };
+  }
+  const growSignals = [
+    { key: "hook", w: 0.3, label: "Gancho", value: `${hookWords} palabras`, detail: spokenHook ? "dichas en los primeros 3 s" : "en la primera frase", status: hookStatus, icon: Zap },
+    { ...visualSignal, w: 0.25 },
+    { key: "share", w: 0.2, label: "Compartible", value: shareTrigger ? "Sí" : "No", detail: "lista o pedido de enviarlo", status: shareTrigger ? "good" : "warn", icon: Repeat2 },
+    { key: "follow", w: 0.15, label: "Razón para seguirte", value: followTrigger ? "Sí" : "No", detail: "serie o próxima entrega", status: followTrigger ? "good" : "warn", icon: UserPlus },
+    { key: "search", w: 0.1, label: "Descubrimiento", value: `${searchHits} palabras`, detail: "que un escritor buscaría", status: searchHits >= 2 ? "good" : searchHits === 1 ? "warn" : "bad", icon: Search },
+  ];
+  const capSignals = [
     { key: "jargon", label: "Lenguaje accesible", value: `${jargon}/100`, detail: "densidad de jerga", status: jargon < 30 ? "good" : jargon < 60 ? "warn" : "bad", icon: Languages },
     {
       key: "bridge", label: "Puente comercial", value: pillar === "comunidad" && !hasBridge ? "Opcional" : hasBridge ? "Sí" : "No",
@@ -737,8 +900,13 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
     { key: "vuln", label: "Vulnerabilidad", value: vulnerability ? "Sí" : "No", detail: "aparece tu novela o tu proceso", status: vulnerability ? "good" : pillar === "proceso" ? "bad" : "warn", icon: Feather },
     { key: "talk", label: "Conversación", value: openQuestion ? "Sí" : "No", detail: "invita a responder", status: openQuestion ? "good" : pillar === "comunidad" ? "bad" : "warn", icon: MessagesSquare },
   ];
-  const weights = { hook: 0.25, jargon: 0.2, bridge: 0.2, vuln: 0.15, talk: 0.2 };
-  const score = Math.round(signals.reduce((acc, x) => acc + pts[x.status] * weights[x.key], 0));
+  const capWeights = { jargon: 0.25, bridge: 0.35, vuln: 0.2, talk: 0.2 };
+  capSignals.forEach((x) => (x.w = capWeights[x.key]));
+  const groupScore = (list) => Math.round(list.reduce((acc, x) => acc + pts[x.status] * x.w, 0));
+  const capScore = groupScore(capSignals);
+  const growScore = groupScore(growSignals);
+  const score = Math.round(capScore * GOAL_WEIGHT.captacion + growScore * GOAL_WEIGHT.crecimiento);
+  const signals = [...capSignals, ...growSignals];
 
   // --- Diagnóstico
   const issues = [];
@@ -785,7 +953,7 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   if (hookStatus !== "good") {
     issues.push({
       id: "hook", sev: hookStatus === "bad" ? "alta" : "media", icon: Zap, title: "Gancho inicial débil",
-      why: `${spokenHook ? "En los primeros 3 segundos decís" : "Tu primera frase es"} “${hookSentence.length > 140 ? `${hookSentence.slice(0, 140)}…` : hookSentence}”. ${weakOpener ? "Empieza con un saludo: en los primeros 3 segundos la gente decide si se queda." : hookJargon ? "Empieza con un concepto académico: quien no lo conoce, se va." : `Tiene ${hookWords} palabras: es demasiado larga para leerse de un vistazo.`}`,
+      why: `${spokenHook ? "En los primeros 3 segundos decís" : "Tu primera frase es"} “${hookSentence.length > 140 ? `${hookSentence.slice(0, 140)}…` : hookSentence}”. ${weakOpener ? "Empieza con un saludo: en los primeros 3 segundos la gente decide si se queda." : hookJargon ? "Empieza con un concepto académico: quien no lo conoce, se va." : hookWords > 20 ? `Tiene ${hookWords} palabras: es demasiado larga para leerse de un vistazo.` : "Es correcta pero no genera curiosidad: no hay pregunta, número, error ni promesa que obligue a quedarse."}`,
       fix: {
         title: "Abrí con el problema del escritor, no con el tema",
         steps: ["Primera frase: una situación que tu alumno ideal vive hoy.", "Texto en pantalla con esa misma frase.", "Prometé qué se va a llevar en menos de 10 palabras."],
@@ -877,6 +1045,71 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
       });
     }
   }
+  // --- Crecimiento: compartible, razón para seguir, atractivo visual
+  if (!shareTrigger) {
+    issues.push({
+      id: "shares", sev: "media", icon: Repeat2, title: "Poco compartible",
+      why: "No hay nada que invite a mandarlo a otra persona: ni una lista que valga la pena guardar, ni un pedido de compartir. Los envíos por mensaje son la señal que más empuja una pieza hacia gente que no te sigue.",
+      fix: {
+        title: "Hacelo enviable",
+        steps: [
+          "Estructurá la idea como lista con número (“3 errores…”, “5 preguntas…”).",
+          "Nombrá a quién mandárselo: una persona concreta que tu lector conoce.",
+          "Dejá una frase citable en pantalla, de las que dan ganas de compartir en historias.",
+        ],
+        example: "Mandáselo a esa amiga que hace años dice que va a escribir su novela.",
+      },
+    });
+  }
+  if (!followTrigger) {
+    issues.push({
+      id: "follows", sev: "media", icon: UserPlus, title: "Sin razón para seguirte",
+      why: "Nada le dice a quien te descubre por qué volver mañana. Sin eso, mira, le gusta y se va.",
+      fix: {
+        title: "Convertilo en serie",
+        steps: [
+          "Numerá la pieza: “Parte 1 de 3” en la portada y en los primeros segundos.",
+          "Anunciá la próxima entrega con día: “el jueves subo…”.",
+          "Si ya pedís que te escriban por talleres, poné el pedido de seguirte en el texto del post, no en el video: un solo pedido por pieza.",
+        ],
+        example: "Esto es la parte 1. Seguime: el jueves subo cómo resolví el capítulo 13.",
+      },
+    });
+  }
+  if (kind === "video" && visual) {
+    facts.push(`${visual.cuts.length} cortes`);
+    if (visual.avgShot > 3) {
+      issues.push({
+        id: "pace", sev: visual.avgShot > 5 ? "alta" : "media", icon: Move, title: "Ritmo visual lento",
+        why: `Un cambio de plano cada ${dec(visual.avgShot)} s en promedio (${visual.cuts.length} cortes en ${Math.round(visual.duration)} s). Con la imagen quieta, el pulgar sigue de largo aunque el contenido sea bueno.`,
+        fix: {
+          title: "Cambiá de plano cada 1,5 a 2,5 segundos",
+          steps: [
+            "Alterná tu cara, la pantalla mientras escribís, el cuaderno o el libro del que hablás.",
+            "Si es un solo plano, usá zoom digital suave en las frases clave.",
+            "Sumá texto en pantalla que cambie con cada idea.",
+          ],
+        },
+      });
+    }
+    if (visual.earlyChange < 8 && !visual.cuts.some((t) => t <= 3)) {
+      issues.push({
+        id: "static", sev: "media", icon: Move, title: "Primeros 3 segundos estáticos",
+        why: "En los primeros 3 segundos no hay cortes ni movimiento visible. Es justo el momento en que la gente decide si se queda.",
+        fix: {
+          title: "Poné movimiento en el primer segundo",
+          steps: ["Arrancá con un gesto, un libro que se abre o la mano escribiendo.", "Hacé aparecer el gancho como texto animado.", "Cortá a un segundo plano antes del segundo 2."],
+        },
+      });
+    }
+    if (visual.brightness < 70) {
+      issues.push({
+        id: "dark", sev: "baja", icon: Sun, title: "Video oscuro",
+        why: `El brillo medio es ${Math.round(visual.brightness)}/255. En el celular, una imagen oscura se ve apagada al lado de los otros videos del feed.`,
+        fix: { title: "Grabá con luz de frente", steps: ["Ponete frente a una ventana, no de espaldas.", "Si grabás de noche, una lámpara a la altura de la cara alcanza."] },
+      });
+    }
+  }
   // --- Audio del video (señal) y subtítulos (lo que se dice)
   if (audio) {
     facts.push(audio.hasAudio ? `sonido desde ${dec(audio.startSilence)} s` : "sin sonido");
@@ -940,7 +1173,8 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
       });
     }
   }
-  issues.sort((x, y) => SEV_ORDER[x.sev] - SEV_ORDER[y.sev]);
+  issues.forEach((i) => (i.goal = GOAL_OF[i.id] || "captacion"));
+  issues.sort(byPriority);
 
   const strengths = [];
   if (hookStatus === "good") strengths.push(`Gancho directo: ${spokenHook ? "lo que decís en los primeros 3 segundos" : "la primera frase"} tiene ${hookWords} palabras y no arranca con saludos.`);
@@ -950,9 +1184,12 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   if (hasBridge) strengths.push("Tiene puente comercial: el lector sabe que puede aprender esto con vos.");
   if (vulnerability) strengths.push("Mostrás tu proceso real: la gente se identifica con vos, no solo con el tema.");
   if (openQuestion) strengths.push("Termina invitando a responder: vas a recibir comentarios de valor.");
+  if (shareTrigger) strengths.push("Es compartible: tiene una lista o un pedido concreto de enviarlo.");
+  if (followTrigger) strengths.push("Da una razón para seguirte: anuncia una serie o la próxima entrega.");
+  if (kind === "video" && visual && visual.avgShot <= 2.5) strengths.push(`Ritmo visual ágil: un plano cada ${dec(visual.avgShot)} s.`);
 
   const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
-  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon }));
+  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon, goal: i.goal }));
   if (!issues.length) {
     plan = [{
       title: "Publicalo y conversá en la primera hora",
@@ -962,7 +1199,11 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   }
   // Un problema de prioridad alta o media impide el "listo para publicar"
   const status = issues.some((i) => i.sev !== "baja") && score >= 72 ? "warn" : statusOf(score);
-  return { words, pillar, detected, score, status, signals, issues, strengths, plan, facts };
+  const groups = [
+    { key: "captacion", score: capScore, status: statusOf(capScore), signals: capSignals },
+    { key: "crecimiento", score: growScore, status: statusOf(growScore), signals: growSignals },
+  ];
+  return { words, pillar, detected, score, status, capScore, growScore, groups, signals, issues, strengths, plan, facts };
 }
 
 /* ============================================================
@@ -1186,24 +1427,57 @@ function Lights({ status, size = "sm" }) {
   );
 }
 
+function GoalHeading({ goal }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h2 className="font-display text-lg font-bold">{GOALS[goal].label}</h2>
+      <span className="text-sm text-muted">{GOALS[goal].sub} · peso {Math.round(GOAL_WEIGHT[goal] * 100)}%</span>
+    </div>
+  );
+}
+function GoalTag({ goal }) {
+  return <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", GOALS[goal].tag)}>{GOALS[goal].label}</span>;
+}
+
+const GROUP_COLS = { 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5" };
+
+/** Semáforo: veredicto total y un grupo de señales por objetivo (captación y crecimiento). */
 function TrafficLightPanel({ analysis }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <div className={cx("col-span-2 flex items-center gap-4 rounded-2xl border p-4 sm:col-span-1", STATUS[analysis.status].border, STATUS[analysis.status].soft)}>
+    <div className="space-y-4">
+      <div className={cx("flex flex-wrap items-center gap-4 rounded-2xl border p-4", STATUS[analysis.status].border, STATUS[analysis.status].soft)}>
         <Lights status={analysis.status} size="lg" />
-        <div className="min-w-0">
-          <div className="text-xs font-medium uppercase tracking-wider text-muted">Potencial de captación</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium uppercase tracking-wider text-muted">Veredicto general</div>
           <div className={cx("font-display text-lg font-bold leading-tight", STATUS[analysis.status].text)}>{STATUS[analysis.status].long}</div>
           <div className="font-mono text-xs text-muted">Puntaje {analysis.score}/100</div>
         </div>
+        <div className="flex gap-5">
+          {analysis.groups.map((g) => (
+            <div key={g.key} className="text-right">
+              <div className={cx("font-mono text-2xl font-semibold tabular-nums", STATUS[g.status].text)}>{g.score}</div>
+              <div className="text-[11px] text-muted">{GOALS[g.key].label} · {Math.round(GOAL_WEIGHT[g.key] * 100)}%</div>
+            </div>
+          ))}
+        </div>
       </div>
-      {analysis.signals.map((s) => (
-        <div key={s.key} className="flex items-center gap-3 rounded-2xl border border-line p-3.5">
-          <Lights status={s.status} />
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-muted"><s.icon className="h-3.5 w-3.5 shrink-0" />{s.label}</div>
-            <div className={cx("font-mono text-lg font-semibold tabular-nums", STATUS[s.status].text)}>{s.value}</div>
-            <div className="text-[11px] leading-snug text-muted">{s.detail}</div>
+      {analysis.groups.map((g) => (
+        <div key={g.key}>
+          <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="text-sm font-semibold">{GOALS[g.key].label}</span>
+            <span className="text-xs text-muted">{GOALS[g.key].sub}</span>
+          </div>
+          <div className={cx("grid gap-3", g.signals.length % 2 ? "grid-cols-1" : "grid-cols-2", GROUP_COLS[g.signals.length])}>
+            {g.signals.map((s) => (
+              <div key={s.key} className="flex items-center gap-3 rounded-2xl border border-line p-3.5">
+                <Lights status={s.status} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted"><s.icon className="h-3.5 w-3.5 shrink-0" />{s.label}</div>
+                  <div className={cx("font-mono text-lg font-semibold tabular-nums", STATUS[s.status].text)}>{s.value}</div>
+                  <div className="text-[11px] leading-snug text-muted">{s.detail}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       ))}
@@ -1295,6 +1569,11 @@ function DashboardView({ posts, analyses, onOpen, goContent }) {
           <p className="text-xs font-semibold uppercase tracking-wider text-muted">Preparación para lanzar talleres</p>
           <p className={cx("mt-1 font-display text-xl font-bold", STATUS[rStatus].text)}>{STATUS[rStatus].long}</p>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed">{readinessText}</p>
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-muted">Potencial de crecimiento:</span>
+            <span className="font-mono font-semibold tabular-nums">{acc.growth}/100</span>
+            <StatusPill status={statusOf(acc.growth)} />
+          </p>
         </div>
         <div className="grid shrink-0 grid-cols-3 gap-4 text-center sm:grid-cols-1 sm:gap-2 sm:text-left">
           {[
@@ -1310,6 +1589,7 @@ function DashboardView({ posts, analyses, onOpen, goContent }) {
         </div>
       </Card>
 
+      <GoalHeading goal="captacion" />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <KpiCard k="authority" value={acc.kpis.authority} weighted={acc.kpisWeighted.authority} status={acc.kpiStatus.authority} icon={BookmarkCheck}
           explain="Cuánta gente guardó o compartió tus análisis y herramientas. Es la señal de que te ven como alguien de quien aprender." />
@@ -1317,6 +1597,16 @@ function DashboardView({ posts, analyses, onOpen, goContent }) {
           explain="Comentarios que preguntan, debaten o cuentan su propio problema de escritura. Los emojis no cuentan." />
         <KpiCard k="connection" value={acc.kpis.connection} weighted={acc.kpisWeighted.connection} status={acc.kpiStatus.connection} icon={HeartHandshake}
           explain="Mensajes directos por cada mil cuentas. Es interés real en vos y tu proceso: de acá salen las mentorías." />
+      </div>
+
+      <GoalHeading goal="crecimiento" />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <KpiCard k="reachNew" value={acc.kpis.reachNew} weighted={acc.kpisWeighted.reachNew} status={acc.kpiStatus.reachNew} icon={Users}
+          explain="Cuánto del alcance llega a gente que todavía no te sigue. Es lo que hace crecer la cuenta: sin esto, le hablás siempre a los mismos." />
+        <KpiCard k="shares" value={acc.kpis.shares} weighted={acc.kpisWeighted.shares} status={acc.kpiStatus.shares} icon={Repeat2}
+          explain="Envíos por mensaje y compartidos en historias. Es la señal que más empuja una publicación hacia afuera de tu comunidad." />
+        <KpiCard k="follows" value={acc.kpis.follows} weighted={acc.kpisWeighted.follows} status={acc.kpiStatus.follows} icon={UserPlus}
+          explain="Cuántas personas te siguen después de ver una publicación. Mide si tu contenido promete algo que vale la pena seguir." />
       </div>
 
       <Card className="p-5">
@@ -1595,7 +1885,7 @@ function PlanSection({ title, plan, heading, intro }) {
                   <h4 className="font-semibold leading-snug">{p.title}</h4>
                   <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", p.impact === "Alto" ? "bg-accent/12 text-accent" : "bg-fg/5 text-muted")}>Impacto {p.impact.toLowerCase()}</span>
                 </div>
-                <p className="mt-0.5 text-xs text-muted">Corrige: {p.from}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">Corrige: {p.from} {p.goal && <GoalTag goal={p.goal} />}</p>
                 {p.lead && <p className="mt-3 text-sm leading-relaxed">{p.lead}</p>}
                 <ul className="mt-3 space-y-1.5">
                   {p.steps.map((s) => (
@@ -1744,6 +2034,7 @@ function AnalysisPanel({ post, analysis, onClose }) {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold">{i.title}</span>
                           <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", SEV_STYLE[i.sev])}>{i.sev}</span>
+                          {i.goal && <GoalTag goal={i.goal} />}
                         </div>
                         <p className="mt-1 text-sm leading-relaxed text-muted">{i.why}</p>
                       </div>
@@ -1770,10 +2061,39 @@ function AnalysisPanel({ post, analysis, onClose }) {
             </div>
           </section>
 
-          <PlanSection title={post.title} plan={analysis.plan} heading="Plan de acción: cómo convertirlo en alumnos" intro="Ordenado por prioridad comercial. Empezá por lo de impacto alto." />
+          <PlanSection title={post.title} plan={analysis.plan} heading="Plan de acción: cómo convertirlo en alumnos" intro="Ordenado por impacto. A igual impacto, primero lo que afecta a la captación de alumnos." />
         </div>
       </div>
     </div>
+  );
+}
+
+/** Imagen del video: cortes de plano, ritmo, luz y movimiento al inicio. */
+function VisualCard({ visual }) {
+  if (!visual) {
+    return <Card className="flex items-center gap-3 p-5 text-sm text-muted"><Move className="h-4 w-4 animate-pulse text-accent" /> Analizando la imagen del video…</Card>;
+  }
+  const early = visual.earlyChange >= 8 || visual.cuts.some((t) => t <= 3);
+  return (
+    <Card className="p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><Move className="h-4 w-4 text-accent" /> Imagen del video</h4>
+        <span className="font-mono text-xs text-muted">fotogramas comparados cada {dec(clamp(visual.duration / 150, 0.25, 1), 2)} s</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { l: "Cortes de plano", v: visual.cuts.length },
+          { l: "Segundos por plano (ideal ≤ 2,5)", v: `${dec(visual.avgShot)} s`, st: visual.avgShot <= 2.5 ? "good" : visual.avgShot <= 4 ? "warn" : "bad" },
+          { l: "Movimiento en los primeros 3 s", v: early ? "Sí" : "No", st: early ? "good" : "warn" },
+          { l: "Brillo medio", v: `${Math.round(visual.brightness)}/255`, st: visual.brightness >= 70 ? "good" : "warn" },
+        ].map((x) => (
+          <div key={x.l} className="rounded-xl bg-surface2 p-3">
+            <div className={cx("font-mono text-lg font-semibold tabular-nums", x.st && STATUS[x.st].text)}>{x.v}</div>
+            <div className="text-[11px] leading-tight text-muted">{x.l}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -1810,7 +2130,7 @@ function AudioCard({ audio }) {
           ))}
           <line x1={x(3)} x2={x(3)} y1={pt - 4} y2={H - pb} strokeDasharray="4 4" className="stroke-fg/50" />
           <text x={x(3) + 6} y={pt - 6} className="fill-fg text-[11px] font-semibold">Segundo 3</text>
-          {ticks.map((t) => <text key={t} x={x(t)} y={H - 6} textAnchor="middle" className="fill-muted font-mono text-[10px]">{t}s</text>)}
+          {ticks.map((t, i) => <text key={t} x={x(t)} y={H - 6} textAnchor={i === ticks.length - 1 ? "end" : i === 0 ? "start" : "middle"} className="fill-muted font-mono text-[10px]">{t}s</text>)}
         </svg>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1875,6 +2195,7 @@ function DraftPanel({ draft, onClose }) {
   const [media, setMedia] = useState(null);
   const [audio, setAudio] = useState(draft.kind === "video" ? "loading" : null);
   const [cues, setCues] = useState(draft.cues || null);
+  const [visual, setVisual] = useState(null);
   const subsRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -1883,6 +2204,7 @@ function DraftPanel({ draft, onClose }) {
     if (draft.kind !== "video" || !draft.file) return;
     let cancelled = false;
     analyzeAudio(draft.file).then((a) => !cancelled && setAudio(a), () => !cancelled && setAudio({ error: true }));
+    analyzeVisual(draft.url).then((x) => !cancelled && setVisual(x), () => {});
     return () => { cancelled = true; };
   }, [draft]);
 
@@ -1927,14 +2249,19 @@ function DraftPanel({ draft, onClose }) {
   }, [draft]);
 
   const audioReady = audio && audio !== "loading" && !audio.error ? audio : null;
-  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues }), [draft.kind, text, pillar, media, audioReady, cues]);
+  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media, audio: audioReady, cues, visual }), [draft.kind, text, pillar, media, audioReady, cues, visual]);
   const Kind = DRAFT_KIND[draft.kind];
   const hasText = analysis.words > 0;
-  const verdict = {
-    good: "Listo para publicar. Cumple los criterios de autoridad y captación.",
-    warn: "Casi listo. Corregí lo de impacto alto antes de publicarlo.",
-    bad: "Todavía no. Tal como está, este borrador no va a atraer alumnos.",
-  }[analysis.status];
+  const capOk = analysis.capScore >= 72, growOk = analysis.growScore >= 72;
+  const verdict = analysis.status === "good" && capOk && growOk
+    ? "Listo para publicar: le habla a tus futuros alumnos y tiene con qué circular."
+    : capOk && !growOk
+      ? "Está bien orientado a captar alumnos, pero le falta atractivo para llegar a gente nueva."
+      : !capOk && growOk
+        ? "Tiene con qué circular, pero no le dice a nadie que enseñás esto."
+        : analysis.status === "bad"
+          ? "Todavía no. Tal como está, no va a atraer alumnos ni seguidores nuevos."
+          : "Casi listo. Corregí lo de impacto alto antes de publicarlo.";
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="draft-title">
@@ -2003,7 +2330,12 @@ function DraftPanel({ draft, onClose }) {
             </div>
           </div>
 
-          {draft.kind === "video" && <AudioCard audio={audio} />}
+          {draft.kind === "video" && (
+            <div className="space-y-4">
+              <VisualCard visual={visual} />
+              <AudioCard audio={audio} />
+            </div>
+          )}
 
           {hasText && (
             <>
@@ -2024,6 +2356,7 @@ function DraftPanel({ draft, onClose }) {
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-semibold">{i.title}</span>
                               <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", SEV_STYLE[i.sev])}>{i.sev}</span>
+                          {i.goal && <GoalTag goal={i.goal} />}
                             </div>
                             <p className="mt-1 text-sm leading-relaxed text-muted">{i.why}</p>
                           </div>

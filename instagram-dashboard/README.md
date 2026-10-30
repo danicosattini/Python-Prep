@@ -23,6 +23,11 @@ node build.mjs deps
 
 ## Cómo analiza
 
+Dos objetivos con peso distinto: **Captación** (60%, objetivo principal: alumnos para talleres y mentorías) y **Crecimiento** (40%: que te descubran, te sigan, compartan y comenten). Cada problema detectado indica a cuál de los dos afecta.
+
+- **Crecimiento (posts publicados):** alcance a no seguidores, retención o lectura, compartidos cada 1.000 cuentas y seguidores nuevos cada 1.000 cuentas.
+- **Crecimiento (antes de publicar):** gancho con curiosidad, ritmo visual (cortes de plano detectados comparando fotogramas), movimiento en los primeros 3 s, brillo, si es compartible (lista o pedido de enviarlo), si da una razón para seguirte (serie, próxima entrega) y palabras de búsqueda.
+
 - **Pilares:** Autoridad y Teoría (meta 40%), Detrás de Escena / Proceso (35%), Comunidad y Reflexión (25%).
 - **Índices de conversión:** Autoridad = (guardados + compartidos) / alcance; Intención de compra = comentarios de valor cada 1.000 cuentas; Conexión humana = mensajes directos cada 1.000 cuentas. En la cuenta se usa la mediana por publicación para que un post viral no infle el diagnóstico.
 - **Diagnósticos:** Falta de Puente Comercial, Exceso Académico / Jerga, Falta de Vulnerabilidad, además de comentarios superficiales, reflexiones sin pregunta, gancho débil, alcance cautivo y portada poco legible. Cada uno trae su plan de acción.
