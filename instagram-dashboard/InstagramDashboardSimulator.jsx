@@ -11,6 +11,7 @@
  *   2. Datos: pilares de contenido, publicaciones de ejemplo y generador de importadas
  *   3. Motor de análisis: índices de conversión, semáforo, diagnóstico y plan de acción
  *   4. Diagnóstico estratégico de la cuenta (mezcla de pilares, puente comercial, jerga)
+ *   4b. Revisión antes de publicar: analiza un archivo subido (texto, imagen o video)
  *   5. Componentes visuales
  *   6. Vistas: Resumen, Contenido, Análisis profundo, Importar
  *   7. App
@@ -25,6 +26,7 @@ import {
   Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutDashboard, LayoutGrid, Lightbulb, Link2,
   Loader2, Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Plus, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste,
 } from "lucide-react";
 
 /* ============================================================
@@ -641,6 +643,298 @@ function analyzeAccount(posts, analyses) {
 }
 
 /* ============================================================
+ * 4b. Revisión antes de publicar
+ * ------------------------------------------------------------
+ * Antes de publicar no hay métricas: se evalúa el texto (o guion)
+ * con los mismos criterios de captación, y el archivo visual con
+ * comprobaciones de formato que el navegador puede medir
+ * (duración, proporción y contraste).
+ * ============================================================ */
+const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const countHits = (nt, list) => list.filter((k) => nt.includes(k)).length;
+
+/** Términos académicos y su traducción a lenguaje de escritor (los más largos primero). */
+const JARGON = [
+  ["habitus linguistico", "tu forma de hablar"],
+  ["capital simbolico", "prestigio"],
+  ["capital cultural", "lo que leíste y aprendiste en tu entorno"],
+  ["campo literario", "el mundo de los libros"],
+  ["mercado linguistico", "la forma en que se valora cómo habla cada uno"],
+  ["en tanto que", "como"],
+  ["sociolinguistic", "sobre cómo hablamos según de dónde venimos"],
+  ["habitus", "las costumbres que traés de tu entorno"],
+  ["intertextualidad", "el diálogo entre libros"],
+  ["heteroglosia", "las distintas formas de hablar dentro de una novela"],
+  ["polifonia", "varias voces dentro del relato"],
+  ["dialogismo", "el diálogo entre voces"],
+  ["subjetividad", "la mirada de cada persona"],
+  ["alteridad", "el otro"],
+  ["hegemoni", "dominante"],
+  ["episteme", "la forma de pensar de una época"],
+  ["epistemolog", "sobre cómo sabemos lo que sabemos"],
+  ["ontolog", "sobre lo que algo es"],
+  ["hermeneutic", "interpretación"],
+  ["semiotic", "sobre los signos"],
+  ["discursiv", "del modo de contar"],
+  ["dispositivo", "mecanismo"],
+  ["paradigma", "modelo"],
+  ["performativ", "que hace lo que dice"],
+  ["deconstrucc", "desarmar una idea"],
+  ["significante", "la palabra"],
+  ["doxa", "lo que todos dan por sentado"],
+  ["praxis", "la práctica"],
+  ["problematiz", "cuestionar"],
+];
+const ACCENT_CLASS = { a: "[aá]", e: "[eé]", i: "[ií]", o: "[oó]", u: "[uúü]", n: "[nñ]" };
+const termRe = (t) => new RegExp(`(?<!\\p{L})${t.split("").map((c) => ACCENT_CLASS[c] || c).join("")}\\p{L}*`, "giu");
+
+const BRIDGE_WORDS = ["taller", "mentoria", "lista de espera", "inscrib", "inscripc", "cupos", "acompanamiento", "curso", "escribime", "escribeme", "mandame un mensaje", "por dm", "por mensaje", "link en bio", "enlace en bio", "seguime para", "sigueme para", "proxima edicion"];
+const PROCESS_WORDS = ["mi novela", "mi manuscrito", "mi libro", "capitulo", "me costo", "bloqueo", "me bloque", "borre", "reescrib", "mi escritorio", "mi rutina", "estoy escribiendo", "borrador", "confieso", "me paso", "me equivoque", "mi proceso", "mientras escribo", "cuando escribo"];
+const COMMUNITY_WORDS = ["contame", "cuentame", "comenta", "y vos", "y tu", "que opinas", "que piensas", "te pasa", "les pasa", "debate", "pienso que", "creo que", "reflexion", "cita"];
+const AUTHORITY_WORDS = ["analisis", "herramienta", "estructura", "tecnica", "narrador", "personaje", "trama", "punto de vista", "sociolog", "metodo", "como construi", "como escribia", "ejemplo", "garcia marquez", "borges", "cortazar", "austen", "dostoievski", "rulfo", "woolf", "pizarnik", "duras"];
+const SEARCH_WORDS = ["escribir", "escritura", "escritor", "novela", "cuento", "personaje", "taller", "libro", "bloqueo", "editorial", "manuscrito"];
+const WEAK_OPENERS = ["hola", "buenas", "buen dia", "hoy les", "hoy te traigo", "en este video", "en este post", "bienvenid", "como estan"];
+const QUESTION_ALT = {
+  autoridad: "¿Lo aplicarías en tu novela? Contame en qué personaje estás trabajando.",
+  proceso: "¿A vos también te pasó? Contame en qué capítulo te trabaste.",
+  comunidad: "¿Estás de acuerdo o lo ves distinto? Contame tu experiencia en comentarios.",
+};
+
+/** Desvío estándar de la luminancia (0–255): mide si la imagen tiene contraste suficiente. */
+function lumaContrast(source, w, h) {
+  const c = document.createElement("canvas");
+  c.width = 48;
+  c.height = Math.max(1, Math.round((48 * h) / w));
+  const ctx = c.getContext("2d");
+  ctx.drawImage(source, 0, 0, c.width, c.height);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  let s1 = 0, s2 = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const y = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    s1 += y;
+    s2 += y * y;
+    n++;
+  }
+  const mean = s1 / n;
+  return Math.sqrt(Math.max(0, s2 / n - mean * mean));
+}
+
+function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media }) {
+  const text = rawText.trim();
+  const nt = norm(text);
+  const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+  const sentences = text.split(/(?<=[.!?…])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const firstSentence = sentences[0] || "";
+  const avgLen = sentences.length ? words / sentences.length : 0;
+
+  // Jerga: cada término se cuenta una vez por aparición, sin solapar los compuestos
+  let work = text;
+  const found = [];
+  JARGON.forEach(([t, plain]) => {
+    const m = work.match(termRe(t));
+    if (m) {
+      found.push({ term: m[0].toLowerCase(), plain, count: m.length });
+      work = work.replace(termRe(t), " ");
+    }
+  });
+  const jHits = found.reduce((acc, f) => acc + f.count, 0);
+  const jargon = words ? Math.round(clamp((jHits / words) * 2500 + Math.max(0, avgLen - 22) * 2.5)) : 0;
+  const hasBridge = BRIDGE_WORDS.some((k) => nt.includes(k));
+  const processHits = countHits(nt, PROCESS_WORDS);
+  const vulnerability = processHits > 0;
+  const tail = nt.slice(Math.floor(nt.length * 0.6));
+  const openQuestion = tail.includes("?") || COMMUNITY_WORDS.slice(0, 8).some((k) => tail.includes(k));
+  const pillarScores = {
+    autoridad: countHits(nt, AUTHORITY_WORDS) + jHits * 0.5,
+    proceso: processHits * 1.5,
+    comunidad: countHits(nt, COMMUNITY_WORDS) + (nt.match(/\?/g) || []).length * 0.5,
+  };
+  const detected = PILLAR_KEYS.reduce((best, k) => (pillarScores[k] > pillarScores[best] ? k : best), "autoridad");
+  const pillar = pillarChoice === "auto" ? detected : pillarChoice;
+  const P = PILLARS[pillar];
+  const nfs = norm(firstSentence);
+  const weakOpener = WEAK_OPENERS.some((k) => nfs.startsWith(k));
+  const hookWords = firstSentence.split(/\s+/).filter(Boolean).length;
+  const hookJargon = JARGON.some(([t]) => termRe(t).test(firstSentence));
+  const searchHits = countHits(nt, SEARCH_WORDS);
+
+  // --- Semáforo previo: 5 criterios
+  const pts = { good: 90, warn: 60, bad: 25 };
+  const hookStatus = weakOpener || hookJargon ? "bad" : hookWords > 20 ? "warn" : "good";
+  const signals = [
+    { key: "hook", label: "Gancho", value: `${hookWords} palabras`, detail: "en la primera frase", status: hookStatus, icon: Zap },
+    { key: "jargon", label: "Lenguaje accesible", value: `${jargon}/100`, detail: "densidad de jerga", status: jargon < 30 ? "good" : jargon < 60 ? "warn" : "bad", icon: Languages },
+    {
+      key: "bridge", label: "Puente comercial", value: pillar === "comunidad" && !hasBridge ? "Opcional" : hasBridge ? "Sí" : "No",
+      detail: "menciona tus talleres", status: hasBridge || pillar === "comunidad" ? "good" : pillar === "autoridad" ? "bad" : "warn", icon: Briefcase,
+    },
+    { key: "vuln", label: "Vulnerabilidad", value: vulnerability ? "Sí" : "No", detail: "aparece tu novela o tu proceso", status: vulnerability ? "good" : pillar === "proceso" ? "bad" : "warn", icon: Feather },
+    { key: "talk", label: "Conversación", value: openQuestion ? "Sí" : "No", detail: "invita a responder", status: openQuestion ? "good" : pillar === "comunidad" ? "bad" : "warn", icon: MessagesSquare },
+  ];
+  const weights = { hook: 0.25, jargon: 0.2, bridge: 0.2, vuln: 0.15, talk: 0.2 };
+  const score = Math.round(signals.reduce((acc, x) => acc + pts[x.status] * weights[x.key], 0));
+
+  // --- Diagnóstico
+  const issues = [];
+  if (!hasBridge && pillar !== "comunidad") {
+    issues.push({
+      id: "bridge", sev: pillar === "autoridad" ? "alta" : "media", icon: Briefcase, title: "Falta de Puente Comercial",
+      why: "El texto no menciona en ningún momento que das talleres o mentorías. Quien lo lea no va a saber que puede aprender esto con vos.",
+      fix: {
+        title: "Recordale al lector que vos enseñás esto",
+        lead: "El post es brillante en teoría, pero no le recordaste al lector que tú enseñas esto.",
+        steps: [
+          pillar === "proceso" ? "En el cierre, conectá tu bloqueo con el de quien mira y ofrecé conversar por mensaje." : "En la última diapositiva o los últimos segundos, decí en una frase que esto es parte de lo que enseñás.",
+          "Usá una sola acción concreta: seguirte, escribirte una palabra clave por DM o anotarse en la lista de espera.",
+          "Repetí el CTA en la primera línea del texto del post.",
+        ],
+        example: P.bridgeCTA,
+      },
+    });
+  }
+  if (jargon >= 60) {
+    const sample = sentences.find((x) => JARGON.some(([t]) => termRe(t).test(x))) || firstSentence;
+    let plainSample = sample;
+    found.forEach((f) => {
+      const entry = JARGON.find(([t]) => termRe(t).test(f.term));
+      if (entry) plainSample = plainSample.replace(termRe(entry[0]), f.plain);
+    });
+    issues.push({
+      id: "jargon", sev: jargon >= 80 ? "alta" : "media", icon: Languages, title: "Exceso Académico / Jerga",
+      why: `Densidad de vocabulario técnico: ${jargon}/100. Términos detectados: ${found.map((f) => f.term).join(", ")}.${avgLen > 22 ? ` Tus oraciones tienen ${Math.round(avgLen)} palabras en promedio.` : ""}`,
+      fix: {
+        title: "Traducí el concepto sociológico a lenguaje de escritor",
+        lead: "Estás hablando como investigadora para otros investigadores. Traduce el concepto sociológico a un lenguaje accesible para un escritor aficionado.",
+        steps: [
+          "Empezá por el problema que el escritor ya tiene (“mis personajes hablan todos igual”), no por el concepto.",
+          "Nombrá el concepto una sola vez, después de explicarlo con un ejemplo.",
+          "La versión “después” es un reemplazo automático de términos: tomala como punto de partida y ajustá la redacción.",
+        ],
+        before: sample,
+        after: plainSample,
+        glossary: found,
+      },
+    });
+  }
+  if (hookStatus !== "good") {
+    issues.push({
+      id: "hook", sev: hookStatus === "bad" ? "alta" : "media", icon: Zap, title: "Gancho inicial débil",
+      why: `Tu primera frase es “${firstSentence.length > 140 ? `${firstSentence.slice(0, 140)}…` : firstSentence}”. ${weakOpener ? "Empieza con un saludo: en los primeros 3 segundos la gente decide si se queda." : hookJargon ? "Empieza con un concepto académico: quien no lo conoce, se va." : `Tiene ${hookWords} palabras: es demasiado larga para leerse de un vistazo.`}`,
+      fix: {
+        title: "Abrí con el problema del escritor, no con el tema",
+        steps: ["Primera frase: una situación que tu alumno ideal vive hoy.", "Texto en pantalla con esa misma frase.", "Prometé qué se va a llevar en menos de 10 palabras."],
+        example: P.hookAlt,
+      },
+    });
+  }
+  if (!vulnerability && pillar === "autoridad") {
+    issues.push({
+      id: "vulnerability", sev: "media", icon: Feather, title: "Falta de Vulnerabilidad",
+      why: "El texto explica teoría, pero no aparece tu novela ni tu proceso. La autoridad sin cercanía genera respeto, pero no confianza para contratar una mentoría.",
+      fix: {
+        title: "Mostrá cómo usás esto en tu propia novela",
+        lead: "Muestras mucha teoría pero poco de tu novela. La gente compra mentorías a personas, no a enciclopedias. Muestra más tu pantalla escribiendo.",
+        steps: [
+          "Sumá una diapositiva o un plano con tu manuscrito aplicando la herramienta.",
+          "Contá un error propio que esta teoría te ayudó a corregir.",
+          "Mostrá tu pantalla o tu cuaderno escribiendo, aunque sea 3 segundos.",
+        ],
+        example: "Así lo apliqué en el capítulo 12 de mi novela: antes mi protagonista hablaba igual que yo.",
+      },
+    });
+  }
+  if (!openQuestion) {
+    issues.push(pillar === "comunidad"
+      ? {
+          id: "question", sev: "media", icon: MessagesSquare, title: "Reflexión que cierra el tema",
+          why: "Es un post de comunidad que no invita a responder: la reflexión queda completa y no hay lugar para la voz del lector.",
+          fix: {
+            title: "Terminá la reflexión con una pregunta abierta",
+            steps: ["Dejá la reflexión incompleta a propósito: planteá la tensión y pedí su postura.", "Ofrecé dos opciones en conflicto para que elijan y argumenten."],
+            example: QUESTION_ALT[pillar],
+          },
+        }
+      : {
+          id: "shallow", sev: "baja", icon: MessageCircle, title: "Sin invitación a conversar",
+          why: "El texto no termina con una pregunta. Sin pregunta vas a recibir emojis y elogios, no comentarios que revelen qué necesita tu futuro alumno.",
+          fix: {
+            title: "Cerrá con una pregunta que obligue a contar algo propio",
+            steps: ["Evitá preguntas de sí o no.", "Pedí una experiencia concreta: “¿en qué capítulo te trabaste?”."],
+            example: QUESTION_ALT[pillar],
+          },
+        });
+  }
+  if (searchHits === 0) {
+    issues.push({
+      id: "captive", sev: "baja", icon: Users, title: "Pocas palabras de búsqueda",
+      why: "El texto no usa ninguna palabra que un escritor buscaría (escribir, novela, personaje, taller…). Va a llegar casi solo a quienes ya te siguen.",
+      fix: {
+        title: "Escribí para quien busca, no solo para quien ya te sigue",
+        steps: ["Usá palabras que un escritor buscaría (“cómo escribir una novela”, “bloqueo creativo”) en la primera línea y en el texto en pantalla."],
+      },
+    });
+  }
+
+  // --- Comprobaciones del archivo visual
+  const facts = [];
+  if (media?.width) {
+    const ratio = media.height / media.width;
+    facts.push(`${media.width}×${media.height} px`);
+    if (kind === "video") {
+      facts.push(`${Math.round(media.duration)} s`);
+      if (media.duration > 60) {
+        issues.push({
+          id: "length", sev: media.duration > 90 ? "media" : "baja", icon: Clock, title: "Video largo",
+          why: `Dura ${Math.round(media.duration)} segundos. Con un tema denso, la mayoría se va antes de llegar al cierre, que es donde está tu llamado a la acción.`,
+          fix: { title: "Recortá a menos de 60 segundos", steps: ["Quedate con una sola idea por video.", "Mové el llamado a la acción antes del segundo 40.", "Lo que sobre, convertilo en una segunda parte."] },
+        });
+      }
+      if (ratio < 1.6) {
+        issues.push({
+          id: "ratio", sev: "baja", icon: FileVideo, title: "El video no es vertical",
+          why: `La proporción es ${media.width}:${media.height}. En Reels se va a ver con bandas o recortado.`,
+          fix: { title: "Exportá en 9:16 (1080 × 1920)", steps: ["Reencuadrá en vertical y dejá el texto en el centro de la imagen."] },
+        });
+      }
+    } else if (ratio < 1) {
+      issues.push({
+        id: "ratio", sev: "baja", icon: FileImage, title: "Imagen horizontal",
+        why: "En la grilla del perfil se recorta y en el feed ocupa menos pantalla.",
+        fix: { title: "Usá formato vertical 4:5 (1080 × 1350)", steps: ["Reencuadrá la imagen y dejá el texto en el centro."] },
+      });
+    }
+    if (media.contrast != null && media.contrast < 40) {
+      issues.push({
+        id: "cover", sev: kind === "image" ? "media" : "baja", icon: ImageIcon, title: "Portada poco legible",
+        why: `${kind === "video" ? "El primer fotograma" : "La imagen"} tiene poco contraste (${Math.round(media.contrast)}/255): en la grilla no se va a leer.`,
+        fix: { title: "Portada con contraste y una promesa concreta", steps: ["Máximo 6 palabras.", "Texto claro sobre fondo oscuro o al revés.", "Prometé un resultado para el escritor, no un tema académico."] },
+      });
+    }
+  }
+  issues.sort((x, y) => SEV_ORDER[x.sev] - SEV_ORDER[y.sev]);
+
+  const strengths = [];
+  if (hookStatus === "good") strengths.push(`Gancho directo: la primera frase tiene ${hookWords} palabras y no arranca con saludos.`);
+  if (jargon < 30) strengths.push("Lenguaje accesible para un escritor aficionado.");
+  if (hasBridge) strengths.push("Tiene puente comercial: el lector sabe que puede aprender esto con vos.");
+  if (vulnerability) strengths.push("Mostrás tu proceso real: la gente se identifica con vos, no solo con el tema.");
+  if (openQuestion) strengths.push("Termina invitando a responder: vas a recibir comentarios de valor.");
+
+  const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
+  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon }));
+  if (!issues.length) {
+    plan = [{
+      title: "Publicalo y conversá en la primera hora",
+      steps: ["Publicalo en el horario de mayor actividad de tu audiencia.", "Respondé los primeros comentarios con otra pregunta para abrir conversación.", "Si alguien pregunta por talleres, seguí la charla por mensaje directo."],
+      impact: "Alto", from: "Borrador listo", icon: Sparkles,
+    }];
+  }
+  // Un problema de prioridad alta o media impide el "listo para publicar"
+  const status = issues.some((i) => i.sev !== "baja") && score >= 72 ? "warn" : statusOf(score);
+  return { words, pillar, detected, score, status, signals, issues, strengths, plan, facts };
+}
+
+/* ============================================================
  * 5. Componentes visuales
  * ============================================================ */
 const STATUS = {
@@ -1227,15 +1521,13 @@ function ContentView({ posts, analyses, onOpen, onImport }) {
   );
 }
 
-function AnalysisPanel({ post, analysis, onClose }) {
+/** Plan de acción con botón de copiar (posts publicados y borradores). */
+function PlanSection({ title, plan, heading, intro }) {
   const [copied, setCopied] = useState(false);
-  const panelRef = useRef(null);
-  useEffect(() => panelRef.current?.focus(), [post.id]);
-
   const copyPlan = () => {
     const text = [
-      `Plan de acción — ${post.title}`,
-      ...analysis.plan.map((p, i) =>
+      `Plan de acción — ${title}`,
+      ...plan.map((p, i) =>
         [
           `${i + 1}. ${p.title} (impacto ${p.impact.toLowerCase()})`,
           p.lead && `   ${p.lead}`,
@@ -1254,6 +1546,73 @@ function AnalysisPanel({ post, analysis, onClose }) {
       /* portapapeles no disponible */
     }
   };
+
+  return (
+    <section>
+      <SectionTitle icon={Lightbulb} aside={
+        <button onClick={copyPlan} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold transition hover:bg-surface2">
+          {copied ? <Check className="h-3.5 w-3.5 text-good" /> : <Copy className="h-3.5 w-3.5" />}{copied ? "Copiado" : "Copiar plan"}
+        </button>
+      }>{heading}</SectionTitle>
+      <p className="mb-4 text-sm text-muted">{intro}</p>
+      <ol className="space-y-3">
+        {plan.map((p, idx) => (
+          <li key={p.title} className="rounded-2xl border border-line bg-surface p-5">
+            <div className="flex items-start gap-4">
+              <span className="brand-grad grid h-8 w-8 shrink-0 place-items-center rounded-full font-mono text-sm font-bold text-white">{idx + 1}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="font-semibold leading-snug">{p.title}</h4>
+                  <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", p.impact === "Alto" ? "bg-accent/12 text-accent" : "bg-fg/5 text-muted")}>Impacto {p.impact.toLowerCase()}</span>
+                </div>
+                <p className="mt-0.5 text-xs text-muted">Corrige: {p.from}</p>
+                {p.lead && <p className="mt-3 text-sm leading-relaxed">{p.lead}</p>}
+                <ul className="mt-3 space-y-1.5">
+                  {p.steps.map((s) => (
+                    <li key={s} className="flex gap-2 text-sm leading-relaxed"><ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-accent" /> {s}</li>
+                  ))}
+                </ul>
+                {p.after && (
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
+                    <div className="rounded-xl bg-bad/[0.07] p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-bad">Antes · para investigadores</div>
+                      <p className="mt-1 font-serif text-[15px] italic leading-snug">“{p.before}”</p>
+                    </div>
+                    <ArrowRight className="mx-auto h-4 w-4 rotate-90 self-center text-muted sm:rotate-0" />
+                    <div className="rounded-xl bg-good/10 p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-good">Después · para escritores</div>
+                      <p className="mt-1 font-serif text-[15px] italic leading-snug">“{p.after}”</p>
+                    </div>
+                  </div>
+                )}
+                {p.glossary?.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted">Glosario de traducción</div>
+                    <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                      {p.glossary.map((g) => (
+                        <li key={g.term} className="rounded-full bg-surface2 px-2.5 py-1 text-xs"><span className="font-semibold">{g.term}</span> → {g.plain}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {p.example && (
+                  <div className="mt-3 rounded-xl border border-dashed border-accent/40 bg-accent/[0.06] p-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-accent">Ejemplo listo para usar</div>
+                    <p className="mt-1 font-serif text-[16px] italic leading-snug">“{p.example}”</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function AnalysisPanel({ post, analysis, onClose }) {
+  const panelRef = useRef(null);
+  useEffect(() => panelRef.current?.focus(), [post.id]);
 
   const verdict = post.verdict || {
     good: "Construye autoridad y genera conversación con futuros alumnos. Replicá el formato.",
@@ -1381,55 +1740,202 @@ function AnalysisPanel({ post, analysis, onClose }) {
             </div>
           </section>
 
-          <section>
-            <SectionTitle icon={Lightbulb} aside={
-              <button onClick={copyPlan} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold transition hover:bg-surface2">
-                {copied ? <Check className="h-3.5 w-3.5 text-good" /> : <Copy className="h-3.5 w-3.5" />}{copied ? "Copiado" : "Copiar plan"}
-              </button>
-            }>Plan de acción: cómo convertirlo en alumnos</SectionTitle>
-            <p className="mb-4 text-sm text-muted">Ordenado por prioridad comercial. Empezá por lo de impacto alto.</p>
-            <ol className="space-y-3">
-              {analysis.plan.map((p, idx) => (
-                <li key={p.title} className="rounded-2xl border border-line bg-surface p-5">
-                  <div className="flex items-start gap-4">
-                    <span className="brand-grad grid h-8 w-8 shrink-0 place-items-center rounded-full font-mono text-sm font-bold text-white">{idx + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="font-semibold leading-snug">{p.title}</h4>
-                        <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", p.impact === "Alto" ? "bg-accent/12 text-accent" : "bg-fg/5 text-muted")}>Impacto {p.impact.toLowerCase()}</span>
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted">Corrige: {p.from}</p>
-                      {p.lead && <p className="mt-3 text-sm leading-relaxed">{p.lead}</p>}
-                      <ul className="mt-3 space-y-1.5">
-                        {p.steps.map((s) => (
-                          <li key={s} className="flex gap-2 text-sm leading-relaxed"><ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-accent" /> {s}</li>
-                        ))}
-                      </ul>
-                      {p.after && (
-                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
-                          <div className="rounded-xl bg-bad/[0.07] p-3">
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-bad">Antes · para investigadores</div>
-                            <p className="mt-1 font-serif text-[15px] italic leading-snug">“{p.before}”</p>
+          <PlanSection title={post.title} plan={analysis.plan} heading="Plan de acción: cómo convertirlo en alumnos" intro="Ordenado por prioridad comercial. Empezá por lo de impacto alto." />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Zona de arrastrar y soltar para revisar un post antes de publicarlo. */
+function UploadZone({ onFile, onPick, onPaste }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) onFile(f);
+      }}
+      className={cx("mb-6 flex flex-col gap-3 rounded-2xl border-2 border-dashed p-4 transition sm:flex-row sm:items-center", over ? "border-accent bg-accent/[0.06]" : "border-line bg-surface")}
+    >
+      <span className="brand-grad grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white"><Upload className="h-5 w-5" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{over ? "Soltalo para analizarlo" : "Revisá un post antes de publicarlo"}</p>
+        <p className="text-xs leading-relaxed text-muted">Arrastrá acá una imagen, un video o un archivo .txt con el texto. Lo analizo con los mismos criterios y te muestro qué corregir.</p>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <button onClick={onPick} className="brand-grad inline-flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 sm:flex-none">
+          <Upload className="h-4 w-4" /> Subir post/video
+        </button>
+        <button onClick={onPaste} className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-semibold transition hover:bg-surface2 sm:flex-none">
+          <ClipboardPaste className="h-4 w-4" /> Pegar texto
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const DRAFT_KIND = {
+  text: { label: "Texto", icon: FileText },
+  image: { label: "Imagen", icon: FileImage },
+  video: { label: "Video", icon: FileVideo },
+};
+
+/** Revisión antes de publicar: carga el archivo, mide lo que puede y muestra el plan de acción. */
+function DraftPanel({ draft, onClose }) {
+  const [text, setText] = useState(draft.text || "");
+  const [pillar, setPillar] = useState("auto");
+  const [media, setMedia] = useState(null);
+  const panelRef = useRef(null);
+  useEffect(() => panelRef.current?.focus(), []);
+
+  // Medir el archivo visual en el navegador: dimensiones, duración y contraste
+  useEffect(() => {
+    if (!draft.url) return;
+    let cancelled = false;
+    if (draft.kind === "image") {
+      const img = new Image();
+      img.onload = () => {
+        let contrast = null;
+        try { contrast = lumaContrast(img, img.naturalWidth, img.naturalHeight); } catch (e) { /* imagen no legible */ }
+        if (!cancelled) setMedia({ width: img.naturalWidth, height: img.naturalHeight, contrast });
+      };
+      img.src = draft.url;
+    } else if (draft.kind === "video") {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.preload = "auto";
+      v.onloadedmetadata = () => {
+        if (cancelled) return;
+        setMedia({ width: v.videoWidth, height: v.videoHeight, duration: v.duration, contrast: null });
+        v.currentTime = Math.min(0.5, v.duration / 2);
+      };
+      v.onseeked = () => {
+        let contrast = null;
+        try { contrast = lumaContrast(v, v.videoWidth, v.videoHeight); } catch (e) { /* fotograma no legible */ }
+        if (!cancelled) setMedia((m) => ({ ...m, contrast }));
+      };
+      v.src = draft.url;
+    }
+    return () => { cancelled = true; };
+  }, [draft]);
+
+  const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text, pillar, media }), [draft.kind, text, pillar, media]);
+  const Kind = DRAFT_KIND[draft.kind];
+  const hasText = analysis.words > 0;
+  const verdict = {
+    good: "Listo para publicar. Cumple los criterios de autoridad y captación.",
+    warn: "Casi listo. Corregí lo de impacto alto antes de publicarlo.",
+    bad: "Todavía no. Tal como está, este borrador no va a atraer alumnos.",
+  }[analysis.status];
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="draft-title">
+      <div className="anim-fade absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div ref={panelRef} tabIndex={-1} className="anim-slide relative h-full w-full max-w-[920px] overflow-y-auto bg-bg outline-none">
+        <div className="panel-head sticky top-0 z-10 border-b border-line bg-bg/90 backdrop-blur">
+          <div className="gutter flex items-center gap-4 py-3">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-surface2"><Kind.icon className="h-5 w-5" /></span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-muted">Revisión antes de publicar · {Kind.label}</div>
+              <h2 id="draft-title" className="truncate font-display text-lg font-bold">{draft.name}</h2>
+            </div>
+            {hasText && <ScoreRing score={analysis.score} status={analysis.status} size={52} stroke={5} />}
+            <button onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-full hover:bg-surface2" aria-label="Cerrar revisión"><X className="h-5 w-5" /></button>
+          </div>
+        </div>
+
+        <div className="gutter space-y-8 pb-16 pt-6">
+          <div className={cx("grid grid-cols-1 gap-5", draft.url && "md:grid-cols-[220px_1fr]")}>
+            {draft.kind === "image" && <img src={draft.url} alt="Vista previa del post" className="mx-auto max-h-[340px] w-full max-w-[260px] rounded-2xl object-cover md:max-w-none" />}
+            {draft.kind === "video" && <video src={draft.url} controls muted playsInline className="mx-auto max-h-[380px] w-full max-w-[260px] rounded-2xl bg-black md:max-w-none" />}
+            <div className="min-w-0 space-y-4">
+              <div>
+                <p className="font-mono text-xs uppercase tracking-[0.16em] text-accent">Diagnóstico de la consultora</p>
+                <p className="mt-2 font-serif text-xl italic leading-snug">
+                  {hasText ? verdict : draft.kind === "text" ? "Pegá o escribí el texto del post para analizarlo." : "Pegá el texto del post o el guion del video para analizarlo."}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full bg-surface2 px-2.5 py-1">{analysis.words} palabras</span>
+                {analysis.facts.map((f) => <span key={f} className="rounded-full bg-surface2 px-2.5 py-1 font-mono">{f}</span>)}
+                {hasText && <PillarTag pillar={analysis.pillar} short={false} />}
+              </div>
+              <div>
+                <label htmlFor="draft-text" className="mb-1.5 block text-xs font-semibold text-muted">
+                  {draft.kind === "text" ? "Texto del post" : "Texto del post o guion del video"}
+                </label>
+                <textarea
+                  id="draft-text" value={text} onChange={(e) => setText(e.target.value)} rows={7}
+                  placeholder={draft.kind === "video" ? "Pegá acá lo que decís en el video y el texto que va a acompañar al Reel…" : "Pegá acá el texto que vas a publicar…"}
+                  className="w-full resize-y rounded-xl border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition placeholder:text-muted focus:border-accent"
+                />
+                <p className="mt-1.5 text-xs text-muted">
+                  {draft.kind === "video" ? "El audio no se transcribe: el análisis de lenguaje usa este texto. Del video se miden duración, proporción y contraste del primer fotograma." : "El análisis se actualiza mientras escribís."}
+                </p>
+              </div>
+              <div>
+                <label htmlFor="draft-pillar" className="mb-1.5 block text-xs font-semibold text-muted">Pilar de contenido</label>
+                <select id="draft-pillar" value={pillar} onChange={(e) => setPillar(e.target.value)} className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm outline-none focus:border-accent">
+                  <option value="auto">Detectar automáticamente ({PILLARS[analysis.detected].label})</option>
+                  {PILLAR_KEYS.map((k) => <option key={k} value={k}>{PILLARS[k].label}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {hasText && (
+            <>
+              <section>
+                <SectionTitle icon={Target}>Semáforo antes de publicar</SectionTitle>
+                <TrafficLightPanel analysis={analysis} />
+              </section>
+
+              <section className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                <div className="lg:col-span-3">
+                  <SectionTitle icon={TriangleAlert} aside={<span className="text-xs text-muted">{analysis.issues.length} detectados</span>}>Qué corregir</SectionTitle>
+                  {analysis.issues.length ? (
+                    <ul className="space-y-3">
+                      {analysis.issues.map((i) => (
+                        <li key={i.id} className="flex gap-3 rounded-2xl border border-line bg-surface p-4">
+                          <span className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-full", SEV_STYLE[i.sev])}><i.icon className="h-4 w-4" /></span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-semibold">{i.title}</span>
+                              <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", SEV_STYLE[i.sev])}>{i.sev}</span>
+                            </div>
+                            <p className="mt-1 text-sm leading-relaxed text-muted">{i.why}</p>
                           </div>
-                          <ArrowRight className="mx-auto h-4 w-4 rotate-90 self-center text-muted sm:rotate-0" />
-                          <div className="rounded-xl bg-good/10 p-3">
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-good">Después · para escritores</div>
-                            <p className="mt-1 font-serif text-[15px] italic leading-snug">“{p.after}”</p>
-                          </div>
-                        </div>
-                      )}
-                      {p.example && (
-                        <div className="mt-3 rounded-xl border border-dashed border-accent/40 bg-accent/[0.06] p-3">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-accent">Ejemplo listo para usar</div>
-                          <p className="mt-1 font-serif text-[16px] italic leading-snug">“{p.example}”</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </section>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="rounded-2xl border border-line bg-surface p-4 text-sm text-muted">No encontramos frenos a la conversión en este borrador.</p>
+                  )}
+                </div>
+                <div className="lg:col-span-2">
+                  <SectionTitle icon={CircleCheck}>Qué está bien</SectionTitle>
+                  {analysis.strengths.length ? (
+                    <ul className="space-y-2">
+                      {analysis.strengths.map((x) => (
+                        <li key={x} className="flex gap-2.5 rounded-xl bg-good/10 p-3 text-sm leading-relaxed">
+                          <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-good" /> {x}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="rounded-xl bg-surface2 p-3 text-sm text-muted">Ningún criterio está resuelto todavía. Empezá por el plan de acción.</p>
+                  )}
+                </div>
+              </section>
+
+              <PlanSection title={draft.name} plan={analysis.plan} heading="Plan de acción antes de publicar" intro="Ordenado por prioridad comercial. Corregí, pegá la nueva versión arriba y el análisis se actualiza." />
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -1623,17 +2129,36 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const fileRef = useRef(null);
   const [theme, toggleTheme] = useTheme();
   const selected = selectedId ? posts.find((p) => p.id === selectedId) : null;
 
   useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && !importOpen && setSelectedId(null);
+    const onKey = (e) => {
+      if (e.key !== "Escape" || importOpen) return;
+      if (draft) closeDraft();
+      else setSelectedId(null);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [importOpen]);
+  }, [importOpen, draft]);
   useEffect(() => {
-    document.body.style.overflow = selected || importOpen ? "hidden" : "";
-  }, [selected, importOpen]);
+    document.body.style.overflow = selected || importOpen || draft ? "hidden" : "";
+  }, [selected, importOpen, draft]);
+
+  const closeDraft = () => {
+    if (draft?.url) URL.revokeObjectURL(draft.url);
+    setDraft(null);
+  };
+  const handleFile = async (file) => {
+    const type = file.type || "";
+    if (draft?.url) URL.revokeObjectURL(draft.url);
+    if (type.startsWith("image/")) setDraft({ kind: "image", name: file.name, url: URL.createObjectURL(file), text: "" });
+    else if (type.startsWith("video/")) setDraft({ kind: "video", name: file.name, url: URL.createObjectURL(file), text: "" });
+    else if (type.startsWith("text/") || /\.(txt|md)$/i.test(file.name)) setDraft({ kind: "text", name: file.name, text: await file.text() });
+    else setToast("Ese formato no se puede analizar. Subí una imagen, un video o un archivo .txt con el texto.");
+  };
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3200);
@@ -1673,6 +2198,10 @@ export default function App() {
             <Plus className="h-6 w-6 shrink-0 rounded-md border-2 border-current p-0.5" strokeWidth={2.5} />
             <span className="max-xl:hidden">Importar enlace</span>
           </button>
+          <button onClick={() => fileRef.current?.click()} title="Subir post/video" className="flex items-center gap-4 rounded-xl px-3 py-3 text-[15px] text-fg/80 transition hover:bg-surface2">
+            <Upload className="h-6 w-6 shrink-0" strokeWidth={1.8} />
+            <span className="max-xl:hidden">Subir post/video</span>
+          </button>
         </nav>
         <div className="mt-8 hidden space-y-2 px-3 xl:block">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Pilares</p>
@@ -1706,6 +2235,7 @@ export default function App() {
 
       <main className="gutter pb-28 pt-6 md:ml-[76px] md:pb-12 md:pt-10 xl:ml-[260px]">
         <div className="mx-auto max-w-6xl">
+          <UploadZone onFile={handleFile} onPick={() => fileRef.current?.click()} onPaste={() => setDraft({ kind: "text", name: "Texto pegado", text: "" })} />
           {view === "dashboard"
             ? <DashboardView posts={posts} analyses={analyses} onOpen={setSelectedId} goContent={() => setView("content")} />
             : <ContentView posts={posts} analyses={analyses} onOpen={setSelectedId} onImport={() => setImportOpen(true)} />}
@@ -1725,6 +2255,11 @@ export default function App() {
       </nav>
 
       {selected && <AnalysisPanel post={selected} analysis={analyses[selected.id]} onClose={() => setSelectedId(null)} />}
+      {draft && <DraftPanel key={draft.url || draft.name + draft.text.length} draft={draft} onClose={closeDraft} />}
+      <input
+        ref={fileRef} id="draft-file" type="file" accept="image/*,video/*,.txt,.md,text/plain" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+      />
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} onDone={handleImported} existing={posts} />}
       {toast && (
         <div className="anim-pop fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-2 rounded-full bg-fg px-4 py-2.5 text-sm font-medium text-bg shadow-xl md:bottom-8" role="status">

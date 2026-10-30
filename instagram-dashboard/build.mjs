@@ -14,13 +14,14 @@ import { createRoot } from "react-dom/client";
 import App from ${JSON.stringify(path.join(here, "InstagramDashboardSimulator.jsx"))};
 createRoot(document.getElementById("root")).render(<App />);
 `);
-const js = execFileSync(bin("esbuild"), [entry, "--bundle", "--minify", "--format=iife", "--jsx=automatic",
+const js = execFileSync(bin("esbuild"), [entry, "--bundle", "--minify", "--charset=ascii", "--format=iife", "--jsx=automatic",
   "--define:process.env.NODE_ENV=\"production\"", "--target=es2020"],
   { cwd: deps, maxBuffer: 64 << 20, env: { ...process.env, NODE_PATH: path.join(deps, "node_modules") } }).toString();
 const css = execFileSync(bin("tailwindcss"), ["-c", path.join(here, "tailwind.config.js"), "-i", path.join(here, "index.css"), "--minify"],
   { cwd: here, maxBuffer: 64 << 20 }).toString();
 
-const html = `<title>Reelscope Autoridad</title>
+const html = `<meta charset="utf-8">
+<title>Reelscope Autoridad</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
