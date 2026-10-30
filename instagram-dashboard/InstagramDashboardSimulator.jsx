@@ -26,7 +26,7 @@ import {
   Heart, HeartHandshake, Image as ImageIcon, Languages, LayoutGrid, Lightbulb,
   Mail, MessageCircle, MessageSquareQuote, MessagesSquare, MoonStar, PenLine, Search,
   Send, Sparkles, SunMedium, Target, TrendingUp, TriangleAlert, UserPlus, Users, X, Zap,
-  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft, ClipboardCheck, Trash2, ScanEye, RefreshCw, Square, LoaderCircle as Loader,
+  Upload, FileText, FileVideo, FileImage, ClipboardPaste, AudioLines, Captions, Scissors, Repeat2, Sun, Move, ChevronLeft, ClipboardCheck, Trash2, ScanEye, RefreshCw, Square, LoaderCircle as Loader, WandSparkles,
 } from "lucide-react";
 
 /* ============================================================
@@ -468,7 +468,7 @@ function analyzePost(post) {
 
   // --- Plan de acción
   const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
-  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon, goal: i.goal }));
+  let plan = issues.map((i) => ({ ...i.fix, id: i.id, impact: impactOf[i.sev], from: i.title, icon: i.icon, goal: i.goal }));
   if (!issues.length) {
     plan = [
       {
@@ -1276,7 +1276,7 @@ function analyzeDraft({ kind, text: rawText, pillar: pillarChoice, media, audio,
   if (kind === "video" && visual && visual.avgShot <= 2.5) strengths.push(`Ritmo visual ágil: un plano cada ${dec(visual.avgShot)} s.`);
 
   const impactOf = { alta: "Alto", media: "Medio", baja: "Bajo" };
-  let plan = issues.map((i) => ({ ...i.fix, impact: impactOf[i.sev], from: i.title, icon: i.icon, goal: i.goal }));
+  let plan = issues.map((i) => ({ ...i.fix, id: i.id, impact: impactOf[i.sev], from: i.title, icon: i.icon, goal: i.goal }));
   if (!issues.length) {
     plan = [{
       title: "Publicalo y conversá en la primera hora",
@@ -1690,8 +1690,99 @@ function ContentView({ posts, analyses, onOpen }) {
   );
 }
 
+/* ------------------------------------------------------------
+ * Cambios a medida: Claude reescribe cada punto del plan para
+ * ESTA publicación, con su contenido real (texto de diapositivas,
+ * subtítulos con segundos, descripción y datos medidos).
+ * ------------------------------------------------------------ */
+function buildTailorPrompt(context) {
+  return `Sos consultora de contenido para Instagram de una socióloga, investigadora y escritora que publica sobre escritura y literatura. Objetivo principal: atraer alumnos para sus talleres de escritura y mentorías editoriales. Objetivo secundario: crecer (que la descubra gente nueva, la siga, la comparta y le comente).
+
+Esta es una publicación que todavía no subió:
+
+${context}
+
+Para cada problema detectado, escribí el cambio concreto para ESTA publicación, usando su contenido real (sus temas, autores, ejemplos y palabras). Respondé solo con un objeto JSON con estas claves:
+- "cambios": lista con un objeto por problema, con "id" (el id del problema, tal cual), "donde" (dónde se cambia, por ejemplo "Diapositiva 1", "Segundos 0 a 3", "Descripción, primera línea" o "Edición"), "texto_actual" (lo que dice hoy en ese lugar, literal; "" si no aplica), "propuesta" (el texto exacto para poner, listo para copiar; si el problema es de edición, la instrucción precisa con segundos o número de diapositiva), "alternativas" (lista de 2 variantes de la propuesta; lista vacía si es un cambio de edición) y "por_que" (una frase).
+- "descripcion_sugerida": la descripción completa reescrita para este post, de hasta 120 palabras: gancho en la primera línea, palabras que un escritor buscaría, un solo llamado a la acción y una pregunta final.
+
+Reglas: mantené su voz y su tema; no cambies el contenido de fondo. No inventes datos de su vida ni de su novela: si una propuesta necesita un dato personal que no está en el contenido, dejalo entre corchetes para que ella lo complete, por ejemplo [cuántas páginas borraste]. Escribí en español rioplatense, con voseo.`;
+}
+
+function normalizeTailor(raw) {
+  const o = raw && typeof raw === "object" ? raw : {};
+  const byId = {};
+  (Array.isArray(o.cambios) ? o.cambios : []).forEach((c) => {
+    const id = String(c?.id ?? "");
+    const propuesta = String(c?.propuesta ?? "").trim();
+    if (!id || !propuesta) return;
+    byId[id] = {
+      donde: String(c?.donde ?? ""),
+      texto_actual: String(c?.texto_actual ?? "").trim(),
+      propuesta,
+      alternativas: (Array.isArray(c?.alternativas) ? c.alternativas : []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 3),
+      por_que: String(c?.por_que ?? ""),
+    };
+  });
+  return { byId, descripcion: String(o.descripcion_sugerida ?? "").trim() };
+}
+
+/** Botón chico para copiar un texto propuesto. */
+function CopyText({ text, label = "Copiar" }) {
+  const [done, setDone] = useState(false);
+  const copy = () => {
+    try {
+      navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }, () => {});
+    } catch (e) {
+      /* portapapeles no disponible */
+    }
+  };
+  return (
+    <button onClick={copy} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold transition hover:bg-surface2">
+      {done ? <Check className="h-3 w-3 text-good" /> : <Copy className="h-3 w-3" />}{done ? "Copiado" : label}
+    </button>
+  );
+}
+
+/** Estado de las propuestas a medida y la descripción reescrita. */
+function TailorBar({ cap, tailor, stale, canRun, onRun, onStop }) {
+  if (cap === null) {
+    return <p className="mb-4 rounded-xl bg-surface2 p-3 text-sm text-muted">Las propuestas escritas para esta publicación las hace Claude y funcionan con la app abierta dentro de claude.ai. Acá ves ejemplos generales.</p>;
+  }
+  if (cap === undefined) return null;
+  if (tailor.status === "loading") {
+    return (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/[0.05] p-3 text-sm">
+        <span className="flex items-center gap-2"><Loader className="h-4 w-4 animate-spin text-accent" /> Claude está escribiendo los cambios para esta publicación…</span>
+        <button onClick={onStop} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs font-semibold hover:bg-surface2"><Square className="h-3 w-3" /> Detener</button>
+      </div>
+    );
+  }
+  const button = canRun && (
+    <button onClick={onRun} className="brand-grad inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110">
+      <WandSparkles className="h-4 w-4" /> {tailor.status === "done" ? "Actualizar los cambios" : "Escribir los cambios para esta publicación"}
+    </button>
+  );
+  return (
+    <div className="mb-4 space-y-3">
+      {tailor.status === "error" && <p className="rounded-xl bg-warn/12 p-3 text-sm text-warn">{VISION_ERRORS[tailor.code] || "No se pudieron escribir los cambios. Probá de nuevo."}</p>}
+      {tailor.status === "done" && stale && <p className="rounded-xl bg-warn/12 p-3 text-sm text-warn">Cambiaste el texto o el análisis desde que se escribieron las propuestas. Actualizalas para que coincidan.</p>}
+      {(tailor.status !== "done" || stale) && button}
+      {tailor.status === "done" && tailor.data.descripcion && (
+        <div className="rounded-2xl border border-accent/40 bg-accent/[0.05] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-accent">Descripción sugerida para esta publicación</span>
+            <CopyText text={tailor.data.descripcion} />
+          </div>
+          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed">{tailor.data.descripcion}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Plan de acción con botón de copiar (posts publicados y borradores). */
-function PlanSection({ title, plan, heading, intro }) {
+function PlanSection({ title, plan, heading, intro, tailored, extra }) {
   const [copied, setCopied] = useState(false);
   const copyPlan = () => {
     const text = [
@@ -1701,8 +1792,10 @@ function PlanSection({ title, plan, heading, intro }) {
           `${i + 1}. ${p.title} (impacto ${p.impact.toLowerCase()})`,
           p.lead && `   ${p.lead}`,
           ...p.steps.map((s) => `   - ${s}`),
-          p.example && `   Ejemplo: "${p.example}"`,
-          p.after && `   Antes: "${p.before}"\n   Después: "${p.after}"`,
+          tailored?.[p.id]
+            ? `   Para esta publicación (${tailored[p.id].donde}): ${tailored[p.id].propuesta}${tailored[p.id].alternativas.length ? `\n   Otras opciones: ${tailored[p.id].alternativas.join(" / ")}` : ""}`
+            : p.example && `   Ejemplo: "${p.example}"`,
+          !tailored?.[p.id] && p.after && `   Antes: "${p.before}"\n   Después: "${p.after}"`,
         ].filter(Boolean).join("\n")
       ),
     ].join("\n\n");
@@ -1724,6 +1817,7 @@ function PlanSection({ title, plan, heading, intro }) {
         </button>
       }>{heading}</SectionTitle>
       <p className="mb-4 text-sm text-muted">{intro}</p>
+      {extra}
       <ol className="space-y-3">
         {plan.map((p, idx) => (
           <li key={p.title} className="rounded-2xl border border-line bg-surface p-5">
@@ -1741,7 +1835,30 @@ function PlanSection({ title, plan, heading, intro }) {
                     <li key={s} className="flex gap-2 text-sm leading-relaxed"><ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-accent" /> {s}</li>
                   ))}
                 </ul>
-                {p.after && (
+                {tailored?.[p.id] && (() => {
+                  const t = tailored[p.id];
+                  const quoted = t.alternativas.length > 0;
+                  return (
+                    <div className="mt-3 rounded-xl border border-accent/40 bg-accent/[0.06] p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-accent">Para esta publicación{t.donde ? ` · ${t.donde}` : ""}</span>
+                        <CopyText text={t.propuesta} />
+                      </div>
+                      {t.texto_actual && <p className="mt-2 text-sm text-muted"><span className="font-semibold">Hoy dice: </span><span className="line-through decoration-bad/60">“{t.texto_actual}”</span></p>}
+                      <p className={cx("mt-2 leading-snug", quoted ? "font-serif text-[17px] italic" : "text-sm font-semibold")}>{quoted ? `“${t.propuesta}”` : t.propuesta}</p>
+                      {t.alternativas.length > 0 && (
+                        <div className="mt-3 space-y-1.5">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-muted">Otras opciones</div>
+                          {t.alternativas.map((a) => (
+                            <div key={a} className="flex items-start justify-between gap-3 text-sm"><span className="font-serif italic">“{a}”</span><CopyText text={a} /></div>
+                          ))}
+                        </div>
+                      )}
+                      {t.por_que && <p className="mt-2 text-xs text-muted">{t.por_que}</p>}
+                    </div>
+                  );
+                })()}
+                {!tailored?.[p.id] && p.after && (
                   <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
                     <div className="rounded-xl bg-bad/[0.07] p-3">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-bad">Antes · para investigadores</div>
@@ -1764,9 +1881,9 @@ function PlanSection({ title, plan, heading, intro }) {
                     </ul>
                   </div>
                 )}
-                {p.example && (
+                {!tailored?.[p.id] && p.example && (
                   <div className="mt-3 rounded-xl border border-dashed border-accent/40 bg-accent/[0.06] p-3">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-accent">Ejemplo listo para usar</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-accent">{tailored ? "Ejemplo general" : "Ejemplo listo para usar"}</div>
                     <p className="mt-1 font-serif text-[16px] italic leading-snug">“{p.example}”</p>
                   </div>
                 )}
@@ -2293,6 +2410,50 @@ function DraftPanel({ draft, onClose, onSave, claudeVision }) {
   const analysis = useMemo(() => analyzeDraft({ kind: draft.kind, text: fullText, pillar, media, audio: audioReady, cues, visual, slides, vision: visionData }), [draft.kind, fullText, pillar, media, audioReady, cues, visual, slides, visionData]);
   const Kind = DRAFT_KIND[draft.kind];
   const hasText = analysis.words > 0;
+
+  // --- Cambios a medida para esta publicación
+  const [tailor, setTailor] = useState({ status: "idle" });
+  const tailorCtl = useRef(null);
+  const tailorSig = `${fullText}|${analysis.issues.map((i) => i.id).join(",")}|${analysis.pillar}`;
+  const buildContext = () => {
+    const parts = [`Formato: ${DRAFT_KIND[draft.kind].label}. Pilar: ${PILLARS[analysis.pillar].label}.`];
+    if (draft.kind === "carousel") parts.push(`Texto de cada diapositiva:\n${(slides || []).map((x, i) => `D${i + 1}: ${visionTexts[i] || "(sin texto leído)"}`).join("\n")}`);
+    if (draft.kind === "image" && visionText) parts.push(`Texto de la imagen: ${visionText}`);
+    if (draft.kind === "video") {
+      if (cues?.length) parts.push(`Lo que se dice (subtítulos con segundos):\n${cues.map((c) => `[${dec(c.start)}–${dec(c.end)} s] ${c.text}`).join("\n").slice(0, 6000)}`);
+      if (visionText) parts.push(`Texto en pantalla visto en los fotogramas: ${visionText}`);
+      const v = [];
+      if (visual) v.push(`dura ${Math.round(visual.duration)} s, ${visual.cuts.length} cortes de plano (uno cada ${dec(visual.avgShot)} s)`);
+      if (audioReady?.hasAudio) v.push(`el sonido empieza en el segundo ${dec(audioReady.startSilence)}`, `pausas largas: ${audioReady.pauses.map((x) => `en el segundo ${dec(x.start)} (${dec(x.length)} s)`).join(", ") || "ninguna"}`);
+      if (v.length) parts.push(`Datos medidos del video: ${v.join("; ")}.`);
+    }
+    if (text.trim()) parts.push(`${draft.kind === "video" ? "Descripción del post o guion" : "Descripción del post"}:\n${text.trim().slice(0, 4000)}`);
+    else parts.push("Descripción del post: (todavía no escribió ninguna)");
+    parts.push(`Problemas detectados:\n${analysis.issues.map((i) => `- id "${i.id}" · ${i.title} (gravedad ${i.sev}, ${GOALS[i.goal].label}): ${i.why}`).join("\n")}`);
+    return parts.join("\n\n");
+  };
+  const runTailor = async () => {
+    if (!claudeVision || !analysis.issues.length) return;
+    tailorCtl.current?.abort();
+    const ctl = new AbortController();
+    tailorCtl.current = ctl;
+    const sig = tailorSig;
+    setTailor({ status: "loading" });
+    try {
+      const raw = await claudeVision.fn.json(buildTailorPrompt(buildContext()), { signal: ctl.signal });
+      setTailor({ status: "done", data: normalizeTailor(raw), sig });
+    } catch (e) {
+      if (e?.code === "cancelled") return setTailor({ status: "idle", stopped: true });
+      setTailor({ status: "error", code: e?.code || "upstream_error" });
+    }
+  };
+  // Con imágenes o video: se escribe sola una vez, cuando terminó la lectura (y el análisis del video)
+  const mediaReady = draft.kind !== "video" || (visual && audio !== "loading");
+  useEffect(() => {
+    if (claudeVision && visual_kind && hasText && mediaReady && ["done", "error"].includes(vis.status) && tailor.status === "idle" && !tailor.stopped && analysis.issues.length) runTailor();
+  }, [claudeVision, vis.status, mediaReady, hasText]);
+  useEffect(() => () => tailorCtl.current?.abort(), []);
+  const tailorStale = tailor.status === "done" && tailor.sig !== tailorSig;
   const save = () => {
     onSave({
       id: Date.now().toString(36),
@@ -2467,7 +2628,14 @@ function DraftPanel({ draft, onClose, onSave, claudeVision }) {
                 </div>
               </section>
 
-              <PlanSection title={draft.name} plan={analysis.plan} heading="Plan de acción antes de publicar" intro="Ordenado por prioridad comercial. Corregí, pegá la nueva versión arriba y el análisis se actualiza." />
+              <PlanSection
+                title={draft.name} plan={analysis.plan} heading="Plan de acción antes de publicar"
+                intro="Ordenado por impacto. Cada punto dice qué cambiar en esta publicación y qué poner; cuando corrijas, volvé a subirla y el análisis se actualiza."
+                tailored={tailor.status === "done" ? tailor.data.byId : null}
+                extra={analysis.issues.length > 0 && (
+                  <TailorBar cap={claudeVision} tailor={tailor} stale={tailorStale} canRun={!!claudeVision} onRun={runTailor} onStop={() => tailorCtl.current?.abort()} />
+                )}
+              />
             </>
           )}
         </div>

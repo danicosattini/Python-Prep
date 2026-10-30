@@ -45,3 +45,7 @@ Es la forma de cargar contenido propio: arrastrá una imagen, un video, todas la
 
 Dentro de claude.ai, la página usa la capacidad `sample` con imágenes (`capabilities: {sample: {images: true}}`): manda las diapositivas del carrusel, la imagen o 4–6 fotogramas del video a Claude, que transcribe el texto de cada imagen y evalúa portada, presencia de la autora, proceso visible, texto en pantalla y diseño. Ese texto alimenta el análisis (gancho, jerga, puente comercial, etc.) sin pegarlo a mano. Usa la cuenta de Claude de quien mira la página y pide permiso la primera vez. Fuera de claude.ai la función no está disponible y se puede pegar el texto manualmente.
 
+## Cambios a medida
+
+Después del análisis, Claude recibe el contenido real del post (texto de cada diapositiva, subtítulos con segundos, texto en pantalla, descripción y datos medidos del video) y la lista de problemas, y escribe para cada uno el cambio concreto: dónde se cambia, qué dice hoy, el texto exacto para poner (o la instrucción de edición con segundos), dos alternativas y una descripción completa reescrita. No inventa datos personales: los deja entre corchetes para completar. Con imágenes o video se genera sola una vez; con texto, con un botón. Si el texto cambia, avisa que las propuestas quedaron desactualizadas.
+
