@@ -1,0 +1,60 @@
+/* Layout: barra lateral fija estilo Instagram + lienzo central de tarjetas; panel lateral para el análisis. */
+:root {
+  /* Neutros con leve sesgo magenta; el degradado de marca se usa solo en acciones y marca. */
+  --bg: 250 249 251;
+  --surface: 255 255 255;
+  --surface2: 243 241 246;
+  --line: 229 225 233;
+  --fg: 24 19 31;
+  --muted: 107 99 119;
+  --accent: 214 36 118;
+  --accent2: 124 58 237;
+  --accent3: 245 133 41;
+  --good: 22 150 72;
+  --warn: 202 120 6;
+  --bad: 214 40 40;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 11 9 14; --surface: 21 18 26; --surface2: 31 27 37; --line: 46 41 54;
+    --fg: 244 241 247; --muted: 160 151 173; --accent: 240 80 152; --accent2: 157 107 255; --accent3: 250 152 72;
+    --good: 74 222 128; --warn: 251 191 36; --bad: 248 113 113;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: 11 9 14; --surface: 21 18 26; --surface2: 31 27 37; --line: 46 41 54;
+  --fg: 244 241 247; --muted: 160 151 173; --accent: 240 80 152; --accent2: 157 107 255; --accent3: 250 152 72;
+  --good: 74 222 128; --warn: 251 191 36; --bad: 248 113 113;
+  color-scheme: dark;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { min-height: 100%; }
+body { background: rgb(var(--bg)); color: rgb(var(--fg)); font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 40; background: rgb(var(--bg)); }
+h1, h2, h3 { text-wrap: balance; }
+
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+@media (min-width: 640px) { .gutter { padding-left: max(28px, env(safe-area-inset-left, 0px)); padding-right: max(28px, env(safe-area-inset-right, 0px)); } }
+.sticky-safe { top: env(safe-area-inset-top, 0px); }
+.panel-head { padding-top: env(safe-area-inset-top, 0px); }
+.safe-bottom { padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+
+.ig-grad { background: linear-gradient(45deg, rgb(var(--accent3)), rgb(var(--accent)) 55%, rgb(var(--accent2))); }
+.glow { box-shadow: 0 0 10px 1px var(--glow); }
+
+:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+@keyframes fade { from { opacity: 0 } }
+@keyframes slide { from { transform: translateX(40px); opacity: 0 } }
+@keyframes pop { from { opacity: 0; scale: 0.96 } }
+.anim-fade { animation: fade .2s ease-out; }
+.anim-slide { animation: slide .28s cubic-bezier(.2,.8,.2,1); }
+.anim-pop { animation: pop .2s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}
